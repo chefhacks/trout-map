@@ -689,9 +689,22 @@
         for (let i = 0; i < batches.length; i++) {
           if (ac.signal.aborted) return;
           statusEl.textContent = `Batch ${i + 1}/${batches.length} (${uncached.length} new, ${cached.length} cached)...`;
-          const results = await fetchBatch(batches[i], ac.signal);
+          let results;
+          try {
+            results = await fetchBatch(batches[i], ac.signal);
+          } catch (fetchErr) {
+            statusEl.textContent = `FETCH ERR: ${fetchErr.message}`;
+            throw fetchErr;
+          }
+          statusEl.textContent = `Batch ${i + 1} fetched: ${results.length} results, first data: ${JSON.stringify(results[0]?.data).slice(0, 80)}`;
           all.push(...results);
-          if (!ac.signal.aborted) renderOverlay(all, step);
+          try {
+            if (!ac.signal.aborted) renderOverlay(all, step);
+          } catch (renderErr) {
+            statusEl.textContent = `RENDER ERR: ${renderErr.message} @ ${renderErr.stack?.split('\n')[1]?.trim()}`;
+            throw renderErr;
+          }
+          statusEl.textContent = `Batch ${i + 1} rendered OK, ${all.length} total pts`;
           if (i < batches.length - 1) await sleep(BATCH_DELAY_MS);
         }
 
@@ -703,7 +716,7 @@
       } catch (err) {
         if (err.name === 'AbortError') return;
         console.error(err);
-        statusEl.textContent = `Error: ${err.message}`;
+        statusEl.textContent = `Error: ${err.message} @ ${err.stack?.split('\n')[1]?.trim()}`;
       }
     }
 
