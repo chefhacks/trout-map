@@ -151,16 +151,39 @@
       pointer-events: none;
       text-shadow: 0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.7);
     }
-    .tile-label .wind-arrow {
-      display: inline-block;
-      font-size: 1.3em;
-      vertical-align: middle;
-      line-height: 1;
-    }
-    .tile-label .fish-score { font-weight: 700; }
     .fish-score-good { color: #16a34a; }
     .fish-score-ok { color: #ca8a04; }
     .fish-score-poor { color: #dc2626; }
+
+    /* --- Animated wind streaks --- */
+    .wind-streaks {
+      position: absolute;
+      width: 36px;
+      height: 36px;
+      top: -18px;
+      left: -18px;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .wind-streak {
+      position: absolute;
+      width: 10px;
+      height: 1.5px;
+      background: rgba(50,80,140,0.55);
+      border-radius: 1px;
+      top: 50%;
+      left: -12px;
+      animation: streak-drift var(--streak-dur, 2s) linear infinite;
+      animation-delay: var(--streak-delay, 0s);
+    }
+    .wind-streak:nth-child(2) { top: 35%; width: 7px; }
+    .wind-streak:nth-child(3) { top: 65%; width: 8px; }
+    @keyframes streak-drift {
+      0%   { transform: translateX(0);   opacity: 0; }
+      15%  { opacity: 0.7; }
+      85%  { opacity: 0.7; }
+      100% { transform: translateX(48px); opacity: 0; }
+    }
 
     /* Dim overlay behind panel on mobile */
     .panel-backdrop {
@@ -208,10 +231,9 @@
       <div class="panel-section">
         <div class="panel-section-title">Tile Labels</div>
         <div style="font-size:11px;line-height:1.5">
-          <b>Score</b> = fishing score (0-100)<br>
-          <b>Arrow</b> = wind direction<br>
-          <b>Number after arrow</b> = wind km/h<br>
           <b>&deg;</b> = temperature &deg;C<br>
+          <b>km/h</b> = wind speed<br>
+          <b>~streaks~</b> = animated wind direction<br>
           <b>hPa</b> = atm. pressure<br>
           <b>mm</b> = precipitation<br>
           <b>&#9729;</b> = cloud cover %
@@ -556,30 +578,40 @@
         rectLayer.addLayer(rect);
 
         // Build label HTML
-        const arrow = windDirToArrow(d.wind_direction_10m);
         const compass = windDirToCompass(d.wind_direction_10m);
+        // Wind direction: meteorological = "from", so rotate by deg (wind blows FROM this dir)
+        // CSS rotate: 0deg = moving right, so we convert: met 0°=N(from N→blows S)
+        // Streaks move in wind direction: rotate = windDir + 180° (direction wind goes TO)
+        const streakAngle = (d.wind_direction_10m + 180) % 360;
+        // Animation speed: stronger wind = faster streaks
+        const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
+        const windStreaks = `<div class="wind-streaks" style="transform:rotate(${streakAngle}deg)">` +
+          `<div class="wind-streak" style="--streak-dur:${streakDur}s;--streak-delay:0s"></div>` +
+          `<div class="wind-streak" style="--streak-dur:${streakDur}s;--streak-delay:${(streakDur * 0.33).toFixed(1)}s"></div>` +
+          `<div class="wind-streak" style="--streak-dur:${streakDur}s;--streak-delay:${(streakDur * 0.66).toFixed(1)}s"></div>` +
+          `</div>`;
 
         let labelHtml;
         if (zoom >= 10) {
           // Detailed view
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            `${d.temperature_2m.toFixed(1)}° ` +
-            `<span class="wind-arrow">${arrow}</span>${d.wind_speed_10m.toFixed(0)}` +
+            windStreaks +
+            `${d.temperature_2m.toFixed(1)}° ${d.wind_speed_10m.toFixed(0)} km/h` +
             `<br>${d.surface_pressure.toFixed(0)}hPa ${d.precipitation.toFixed(1)}mm` +
             `<br>☁${d.cloud_cover}%` +
             `</div>`;
         } else if (zoom >= 8) {
           // Medium view
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            `${d.temperature_2m.toFixed(0)}° ` +
-            `<span class="wind-arrow">${arrow}</span>${d.wind_speed_10m.toFixed(0)}` +
+            windStreaks +
+            `${d.temperature_2m.toFixed(0)}° ${d.wind_speed_10m.toFixed(0)} km/h` +
             `<br>${d.surface_pressure.toFixed(0)}hPa` +
             `</div>`;
         } else {
           // Minimal view
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            `${d.temperature_2m.toFixed(0)}° ` +
-            `<span class="wind-arrow">${arrow}</span>` +
+            windStreaks +
+            `${d.temperature_2m.toFixed(0)}° ${d.wind_speed_10m.toFixed(0)} km/h` +
             `</div>`;
         }
 
