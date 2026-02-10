@@ -107,7 +107,11 @@
     const BULGARIA_CENTER = [42.7, 25.5];
     const INITIAL_ZOOM = 8;
     const API_BASE = 'https://api.open-meteo.com/v1/forecast';
-    const MAX_POINTS_PER_REQUEST = 800;
+    const MAX_POINTS_PER_REQUEST = 200; // smaller batches to avoid 429s
+    const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min cache lifetime
+    const CACHE_MAX_ENTRIES = 5000; // max individual point entries in cache
+    const BATCH_DELAY_MS = 300; // delay between sequential API batches
+    const MAX_RETRIES = 3;
 
     // Variable metadata: color scales and units
     const VARIABLES = {
@@ -173,6 +177,46 @@
       },
     };
 
+    // --- Cache ---
+    // Key: "variable|lat|lon" -> { value, timestamp }
+    const cache = new Map();
+
+    function cacheKey(variable, lat, lon) {
+      return `${variable}|${lat}|${lon}`;
+    }
+
+    function cacheGet(variable, lat, lon) {
+      const key = cacheKey(variable, lat, lon);
+      const entry = cache.get(key);
+      if (!entry) return undefined;
+      if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+        cache.delete(key);
+        return undefined;
+      }
+      return entry.value;
+    }
+
+    function cachePut(variable, lat, lon, value) {
+      // Evict oldest entries if cache is too large
+      if (cache.size >= CACHE_MAX_ENTRIES) {
+        let oldest = null, oldestKey = null;
+        for (const [k, v] of cache) {
+          if (!oldest || v.timestamp < oldest) { oldest = v.timestamp; oldestKey = k; }
+        }
+        if (oldestKey) cache.delete(oldestKey);
+      }
+      cache.set(cacheKey(variable, lat, lon), { value, timestamp: Date.now() });
+    }
+
+    function cacheStats() {
+      let valid = 0;
+      const now = Date.now();
+      for (const v of cache.values()) {
+        if (now - v.timestamp <= CACHE_TTL_MS) valid++;
+      }
+      return { total: cache.size, valid };
+    }
+
     // --- Map setup ---
     const map = L.map('map', {
       center: BULGARIA_CENTER,
@@ -190,10 +234,11 @@
     let weatherLayer = L.layerGroup().addTo(map);
     let currentAbort = null;
     let debounceTimer = null;
+    // Store last rendered data so opacity changes don't need a refetch
+    let lastRenderData = null;
 
     // --- Helpers ---
 
-    // Interpolate color from stops
     function getColor(value, stops) {
       if (value <= stops[0].val) return stops[0].color;
       if (value >= stops[stops.length - 1].val) return stops[stops.length - 1].color;
@@ -212,19 +257,17 @@
 
     function rgbStr(c, a) { return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
 
-    // Grid step in degrees based on zoom level
-    // Zoomed out = coarser grid, zoomed in = finer grid
+    // Grid step in degrees based on zoom level (coarser to reduce requests)
     function getGridStep(zoom) {
-      if (zoom >= 12) return 0.02;  // ~2 km
-      if (zoom >= 11) return 0.04;  // ~4 km
-      if (zoom >= 10) return 0.06;  // ~6 km
-      if (zoom >= 9)  return 0.1;   // ~10 km
-      if (zoom >= 8)  return 0.15;  // ~15 km
-      if (zoom >= 7)  return 0.25;  // ~25 km
-      return 0.4;                    // ~40 km
+      if (zoom >= 12) return 0.03;  // ~3 km
+      if (zoom >= 11) return 0.06;  // ~6 km
+      if (zoom >= 10) return 0.1;   // ~10 km
+      if (zoom >= 9)  return 0.15;  // ~15 km
+      if (zoom >= 8)  return 0.2;   // ~20 km
+      if (zoom >= 7)  return 0.35;  // ~35 km
+      return 0.5;                    // ~50 km
     }
 
-    // Build grid of coordinates within current map bounds
     function buildGrid(bounds, step) {
       const points = [];
       const south = Math.floor(bounds.getSouth() / step) * step;
@@ -240,10 +283,8 @@
       return points;
     }
 
-    // Find the current hour's index in an hourly time array
     function getCurrentHourIndex(times) {
       const now = new Date();
-      const nowISO = now.toISOString().slice(0, 13); // "YYYY-MM-DDTHH"
       let bestIdx = 0;
       let bestDiff = Infinity;
       for (let i = 0; i < times.length; i++) {
@@ -253,30 +294,78 @@
       return bestIdx;
     }
 
-    // Fetch weather for a batch of points
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    // Fetch with retry + exponential backoff for 429s
+    async function fetchWithRetry(url, signal) {
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        const resp = await fetch(url, { signal });
+        if (resp.ok) return resp;
+        if (resp.status === 429 && attempt < MAX_RETRIES) {
+          const retryAfter = resp.headers.get('Retry-After');
+          const waitMs = retryAfter
+            ? parseInt(retryAfter, 10) * 1000
+            : Math.min(2000 * Math.pow(2, attempt), 16000);
+          console.warn(`429 rate-limited, retrying in ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
+          await sleep(waitMs);
+          continue;
+        }
+        throw new Error(`API error: ${resp.status}`);
+      }
+      throw new Error('Max retries exceeded (429)');
+    }
+
+    // Fetch weather for a batch of points (only those not cached)
     async function fetchBatch(points, variable, signal) {
       const lats = points.map(p => p.lat).join(',');
       const lons = points.map(p => p.lon).join(',');
       const url = `${API_BASE}?latitude=${lats}&longitude=${lons}&hourly=${variable}&forecast_days=1&timezone=auto`;
 
-      const resp = await fetch(url, { signal });
-      if (!resp.ok) throw new Error(`API error: ${resp.status}`);
+      const resp = await fetchWithRetry(url, signal);
       const data = await resp.json();
 
-      // API returns array for multiple points, single object for one point
       const results = Array.isArray(data) ? data : [data];
       return results.map((r, i) => {
         const hourIdx = getCurrentHourIndex(r.hourly.time);
+        const value = r.hourly[variable][hourIdx];
+        // Store in cache
+        cachePut(variable, points[i].lat, points[i].lon, value);
         return {
           lat: points[i].lat,
           lon: points[i].lon,
-          value: r.hourly[variable][hourIdx],
+          value,
         };
       });
     }
 
+    // Render data points onto the map (no fetching)
+    function renderOverlay(dataPoints, variable, step) {
+      weatherLayer.clearLayers();
+      const varMeta = VARIABLES[variable];
+      const opacity = parseFloat(document.getElementById('opacity').value);
+      const halfCell = step / 2;
+
+      for (const pt of dataPoints) {
+        if (pt.value === null || pt.value === undefined) continue;
+        const color = getColor(pt.value, varMeta.stops);
+        const rect = L.rectangle(
+          [[pt.lat - halfCell, pt.lon - halfCell], [pt.lat + halfCell, pt.lon + halfCell]],
+          {
+            color: rgbStr(color, opacity + 0.15),
+            weight: 0,
+            fillColor: rgbStr(color, 1),
+            fillOpacity: opacity,
+          }
+        );
+        rect.bindPopup(`<b>${variable.replace(/_/g, ' ')}</b><br>
+          ${pt.value.toFixed(1)} ${varMeta.unit}<br>
+          <small>(${pt.lat.toFixed(3)}, ${pt.lon.toFixed(3)})</small>`);
+        weatherLayer.addLayer(rect);
+      }
+    }
+
     // Main data loading function
-    async function loadWeatherData() {
+    async function loadWeatherData(forceRefresh = false) {
       if (currentAbort) currentAbort.abort();
       const abortController = new AbortController();
       currentAbort = abortController;
@@ -288,53 +377,70 @@
       const points = buildGrid(bounds, step);
 
       const statusEl = document.getElementById('status');
-      statusEl.textContent = `Loading ${points.length} grid points...`;
 
-      weatherLayer.clearLayers();
+      // Split points into cached vs uncached
+      const cachedResults = [];
+      const uncachedPoints = [];
+      for (const pt of points) {
+        const val = forceRefresh ? undefined : cacheGet(variable, pt.lat, pt.lon);
+        if (val !== undefined) {
+          cachedResults.push({ lat: pt.lat, lon: pt.lon, value: val });
+        } else {
+          uncachedPoints.push(pt);
+        }
+      }
+
+      const stats = cacheStats();
+      statusEl.textContent = `${cachedResults.length} cached, ${uncachedPoints.length} to fetch (cache: ${stats.valid} entries)`;
+
+      // If everything is cached, just render
+      if (uncachedPoints.length === 0) {
+        lastRenderData = { points: cachedResults, variable, step };
+        renderOverlay(cachedResults, variable, step);
+        updateLegend(variable);
+        statusEl.textContent = `Showing ${cachedResults.length} points (all from cache) | Zoom: ${zoom} | Grid: ~${(step * 111).toFixed(0)} km`;
+        return;
+      }
+
+      // Render cached data immediately so the user sees something
+      if (cachedResults.length > 0) {
+        renderOverlay(cachedResults, variable, step);
+      } else {
+        weatherLayer.clearLayers();
+      }
 
       try {
-        // Split into batches of MAX_POINTS_PER_REQUEST
+        // Batch uncached points
         const batches = [];
-        for (let i = 0; i < points.length; i += MAX_POINTS_PER_REQUEST) {
-          batches.push(points.slice(i, i + MAX_POINTS_PER_REQUEST));
+        for (let i = 0; i < uncachedPoints.length; i += MAX_POINTS_PER_REQUEST) {
+          batches.push(uncachedPoints.slice(i, i + MAX_POINTS_PER_REQUEST));
         }
 
-        const allResults = [];
+        const allResults = [...cachedResults];
         for (let i = 0; i < batches.length; i++) {
           if (abortController.signal.aborted) return;
-          statusEl.textContent = `Loading batch ${i + 1}/${batches.length} (${points.length} points)...`;
+          statusEl.textContent = `Fetching batch ${i + 1}/${batches.length} (${uncachedPoints.length} new points, ${cachedResults.length} cached)...`;
           const results = await fetchBatch(batches[i], variable, abortController.signal);
           allResults.push(...results);
+
+          // Progressive render: update map after each batch
+          if (!abortController.signal.aborted) {
+            renderOverlay(allResults, variable, step);
+          }
+
+          // Delay between batches to avoid hammering the API
+          if (i < batches.length - 1) {
+            await sleep(BATCH_DELAY_MS);
+          }
         }
 
         if (abortController.signal.aborted) return;
 
-        // Draw overlay
-        const varMeta = VARIABLES[variable];
-        const opacity = parseFloat(document.getElementById('opacity').value);
-        const cellSize = step; // degrees
-
-        for (const pt of allResults) {
-          if (pt.value === null || pt.value === undefined) continue;
-          const color = getColor(pt.value, varMeta.stops);
-          const halfCell = cellSize / 2;
-          const rect = L.rectangle(
-            [[pt.lat - halfCell, pt.lon - halfCell], [pt.lat + halfCell, pt.lon + halfCell]],
-            {
-              color: rgbStr(color, opacity + 0.15),
-              weight: 0,
-              fillColor: rgbStr(color, 1),
-              fillOpacity: opacity,
-            }
-          );
-          rect.bindPopup(`<b>${variable.replace(/_/g, ' ')}</b><br>
-            ${pt.value.toFixed(1)} ${varMeta.unit}<br>
-            <small>(${pt.lat.toFixed(3)}, ${pt.lon.toFixed(3)})</small>`);
-          weatherLayer.addLayer(rect);
-        }
-
+        lastRenderData = { points: allResults, variable, step };
+        renderOverlay(allResults, variable, step);
         updateLegend(variable);
-        statusEl.textContent = `Showing ${allResults.length} points | Zoom: ${zoom} | Grid: ~${(step * 111).toFixed(0)} km`;
+        const s = cacheStats();
+        statusEl.textContent = `Showing ${allResults.length} points (${cachedResults.length} cached, ${uncachedPoints.length} fetched) | Zoom: ${zoom} | Grid: ~${(step * 111).toFixed(0)} km | Cache: ${s.valid}`;
       } catch (err) {
         if (err.name === 'AbortError') return;
         console.error(err);
@@ -359,24 +465,29 @@
     // --- Event listeners ---
     function debouncedLoad() {
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(loadWeatherData, 600);
+      debounceTimer = setTimeout(() => loadWeatherData(false), 800);
     }
 
     map.on('moveend', debouncedLoad);
     map.on('zoomend', debouncedLoad);
 
-    document.getElementById('variable').addEventListener('change', loadWeatherData);
+    document.getElementById('variable').addEventListener('change', () => loadWeatherData(false));
+
+    // Opacity slider: re-render from lastRenderData without any fetch
     document.getElementById('opacity').addEventListener('input', () => {
-      // Re-render with new opacity without refetching
-      loadWeatherData();
+      if (lastRenderData) {
+        renderOverlay(lastRenderData.points, lastRenderData.variable, lastRenderData.step);
+      }
     });
-    document.getElementById('refresh').addEventListener('click', loadWeatherData);
+
+    // Refresh button forces cache bypass
+    document.getElementById('refresh').addEventListener('click', () => loadWeatherData(true));
 
     // Initial legend
     updateLegend('temperature_2m');
 
     // Load data after a short delay to let map settle
-    setTimeout(loadWeatherData, 500);
+    setTimeout(() => loadWeatherData(false), 500);
   </script>
 </body>
 </html>
