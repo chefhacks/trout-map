@@ -769,6 +769,19 @@
 
     document.getElementById('refresh').addEventListener('click', () => loadWeatherData(true));
 
+    // --- On-screen debug log (for mobile) ---
+    const _origConsoleError = console.error;
+    console.error = function(...args) {
+      _origConsoleError.apply(console, args);
+      document.getElementById('status').textContent = 'ERR: ' + args.map(String).join(' ');
+    };
+    window.onerror = function(msg, src, line, col, err) {
+      document.getElementById('status').textContent = `ERR L${line}: ${msg}`;
+    };
+    window.onunhandledrejection = function(e) {
+      document.getElementById('status').textContent = 'ERR: ' + (e.reason?.message || e.reason);
+    };
+
     updateLegend();
     setTimeout(() => loadWeatherData(false), 500);
   </script>
