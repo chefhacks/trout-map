@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bulgaria Weather Map</title>
+  <title>Bulgaria Fishing Weather Map</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -20,17 +20,17 @@
       padding: 12px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
       font-size: 13px;
-      max-width: 220px;
+      max-width: 230px;
     }
     .controls label {
       display: block;
-      margin-bottom: 6px;
+      margin-bottom: 4px;
       font-weight: 600;
     }
-    .controls select {
+    .controls select, .controls input[type=range] {
       width: 100%;
       padding: 4px 6px;
-      margin-bottom: 10px;
+      margin-bottom: 8px;
       border-radius: 4px;
       border: 1px solid #ccc;
     }
@@ -43,9 +43,9 @@
       color: white;
       cursor: pointer;
       font-weight: 600;
+      margin-bottom: 4px;
     }
     .controls button:hover { background: #1d4ed8; }
-    .controls button:disabled { background: #93c5fd; cursor: wait; }
 
     .legend {
       position: absolute;
@@ -57,16 +57,17 @@
       padding: 10px 12px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
       font-size: 12px;
+      max-height: 50vh;
+      overflow-y: auto;
     }
     .legend-title { font-weight: 600; margin-bottom: 6px; }
     .legend-row { display: flex; align-items: center; margin: 2px 0; }
     .legend-color {
-      width: 20px;
-      height: 14px;
-      margin-right: 6px;
-      border-radius: 2px;
-      border: 1px solid rgba(0,0,0,0.1);
+      width: 20px; height: 14px; margin-right: 6px;
+      border-radius: 2px; border: 1px solid rgba(0,0,0,0.1);
     }
+    .legend-section { margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; }
+    .legend-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
 
     .status {
       position: absolute;
@@ -78,24 +79,49 @@
       padding: 8px 12px;
       box-shadow: 0 2px 10px rgba(0,0,0,0.2);
       font-size: 12px;
+      max-width: 420px;
     }
+
+    /* Tile text labels */
+    .tile-label {
+      font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+      line-height: 1.2;
+      white-space: nowrap;
+      pointer-events: none;
+      text-shadow: 0 0 3px rgba(255,255,255,0.9), 0 0 6px rgba(255,255,255,0.7);
+    }
+    .tile-label .wind-arrow {
+      display: inline-block;
+      font-size: 1.3em;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    .tile-label .fish-score {
+      font-weight: 700;
+    }
+    .fish-score-good { color: #16a34a; }
+    .fish-score-ok { color: #ca8a04; }
+    .fish-score-poor { color: #dc2626; }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
   <div class="controls">
-    <label for="variable">Weather Variable</label>
-    <select id="variable">
-      <option value="temperature_2m">Temperature (°C)</option>
-      <option value="relative_humidity_2m">Humidity (%)</option>
-      <option value="wind_speed_10m">Wind Speed (km/h)</option>
-      <option value="precipitation">Precipitation (mm)</option>
-      <option value="cloud_cover">Cloud Cover (%)</option>
+    <label for="colorBy">Color tiles by</label>
+    <select id="colorBy">
+      <option value="fish_score">Fishing Score</option>
+      <option value="temperature_2m">Temperature</option>
+      <option value="surface_pressure">Pressure</option>
+      <option value="wind_speed_10m">Wind Speed</option>
+      <option value="precipitation">Precipitation</option>
+      <option value="cloud_cover">Cloud Cover</option>
     </select>
-    <label for="opacity">Opacity</label>
-    <input type="range" id="opacity" min="0.1" max="0.9" step="0.05" value="0.45" style="width:100%;margin-bottom:10px;">
-    <button id="refresh">Refresh Data</button>
+    <label for="opacity">Overlay opacity</label>
+    <input type="range" id="opacity" min="0.05" max="0.85" step="0.05" value="0.35">
+    <label for="fontSize">Label size</label>
+    <input type="range" id="fontSize" min="7" max="14" step="1" value="10">
+    <button id="refresh">Refresh (bypass cache)</button>
   </div>
 
   <div class="legend" id="legend"></div>
@@ -107,57 +133,62 @@
     const BULGARIA_CENTER = [42.7, 25.5];
     const INITIAL_ZOOM = 8;
     const API_BASE = 'https://api.open-meteo.com/v1/forecast';
-    const MAX_POINTS_PER_REQUEST = 200; // smaller batches to avoid 429s
-    const CACHE_TTL_MS = 30 * 60 * 1000; // 30 min cache lifetime
-    const CACHE_MAX_ENTRIES = 5000; // max individual point entries in cache
-    const BATCH_DELAY_MS = 300; // delay between sequential API batches
+    const MAX_POINTS_PER_REQUEST = 150;
+    const CACHE_TTL_MS = 30 * 60 * 1000;
+    const CACHE_MAX_ENTRIES = 3000;
+    const BATCH_DELAY_MS = 350;
     const MAX_RETRIES = 3;
 
-    // Variable metadata: color scales and units
-    const VARIABLES = {
+    // All variables fetched in a SINGLE request per point
+    const HOURLY_VARS = [
+      'temperature_2m',
+      'wind_speed_10m',
+      'wind_direction_10m',
+      'surface_pressure',
+      'precipitation',
+      'cloud_cover',
+    ].join(',');
+
+    // --- Color scales ---
+    const COLOR_SCALES = {
       temperature_2m: {
-        unit: '°C',
+        unit: '°C', label: 'Temperature',
         stops: [
-          { val: -15, color: [63, 0, 125] },
-          { val: -5,  color: [49, 54, 149] },
+          { val: -10, color: [49, 54, 149] },
           { val: 0,   color: [69, 117, 180] },
-          { val: 5,   color: [116, 173, 209] },
           { val: 10,  color: [171, 217, 233] },
-          { val: 15,  color: [224, 243, 248] },
           { val: 20,  color: [255, 255, 191] },
-          { val: 25,  color: [254, 224, 144] },
           { val: 30,  color: [253, 174, 97] },
-          { val: 35,  color: [244, 109, 67] },
           { val: 40,  color: [215, 48, 39] },
-          { val: 45,  color: [165, 0, 38] },
         ]
       },
-      relative_humidity_2m: {
-        unit: '%',
+      surface_pressure: {
+        unit: 'hPa', label: 'Pressure',
         stops: [
-          { val: 0,   color: [255, 255, 178] },
-          { val: 20,  color: [254, 204, 92] },
-          { val: 40,  color: [253, 141, 60] },
-          { val: 60,  color: [227, 26, 28] },
-          { val: 80,  color: [49, 54, 149] },
-          { val: 100, color: [8, 29, 88] },
+          { val: 990,  color: [49, 54, 149] },
+          { val: 1000, color: [116, 173, 209] },
+          { val: 1010, color: [171, 217, 233] },
+          { val: 1015, color: [255, 255, 191] },
+          { val: 1020, color: [254, 224, 144] },
+          { val: 1030, color: [253, 174, 97] },
+          { val: 1040, color: [215, 48, 39] },
         ]
       },
       wind_speed_10m: {
-        unit: 'km/h',
+        unit: 'km/h', label: 'Wind Speed',
         stops: [
-          { val: 0,   color: [255, 255, 255] },
-          { val: 5,   color: [200, 230, 255] },
-          { val: 15,  color: [100, 180, 255] },
-          { val: 30,  color: [30, 100, 200] },
-          { val: 50,  color: [200, 80, 80] },
-          { val: 80,  color: [150, 0, 0] },
+          { val: 0,  color: [224, 243, 248] },
+          { val: 10, color: [171, 217, 233] },
+          { val: 20, color: [100, 180, 255] },
+          { val: 35, color: [30, 100, 200] },
+          { val: 50, color: [200, 80, 80] },
+          { val: 80, color: [150, 0, 0] },
         ]
       },
       precipitation: {
-        unit: 'mm',
+        unit: 'mm', label: 'Precipitation',
         stops: [
-          { val: 0,   color: [255, 255, 255] },
+          { val: 0,   color: [255, 255, 240] },
           { val: 0.5, color: [200, 230, 255] },
           { val: 2,   color: [100, 180, 255] },
           { val: 5,   color: [30, 100, 220] },
@@ -166,79 +197,123 @@
         ]
       },
       cloud_cover: {
-        unit: '%',
+        unit: '%', label: 'Cloud Cover',
         stops: [
           { val: 0,   color: [255, 255, 220] },
-          { val: 25,  color: [220, 220, 200] },
-          { val: 50,  color: [180, 180, 180] },
-          { val: 75,  color: [130, 130, 140] },
-          { val: 100, color: [80, 80, 100] },
+          { val: 25,  color: [230, 230, 210] },
+          { val: 50,  color: [190, 190, 190] },
+          { val: 75,  color: [140, 140, 150] },
+          { val: 100, color: [90, 90, 110] },
+        ]
+      },
+      fish_score: {
+        unit: '', label: 'Fishing Score',
+        stops: [
+          { val: 0,  color: [215, 48, 39] },
+          { val: 25, color: [253, 174, 97] },
+          { val: 50, color: [255, 255, 191] },
+          { val: 75, color: [166, 217, 106] },
+          { val: 100, color: [26, 152, 80] },
         ]
       },
     };
 
+    // --- Fishing score ---
+    // Factors: pressure trend matters most but we only have current snapshot,
+    // so we score based on: pressure stability (mid-range = best), low wind,
+    // overcast skies, light or no rain, moderate temps.
+    function computeFishScore(d) {
+      let score = 0;
+
+      // Pressure: 1010-1020 hPa is ideal, slightly falling is best
+      // We approximate: mid-range pressure scores highest
+      const p = d.surface_pressure;
+      if (p >= 1008 && p <= 1022) score += 30;
+      else if (p >= 1000 && p <= 1030) score += 20;
+      else score += 5;
+
+      // Wind: calm to light is best for fishing (0-15 km/h)
+      const w = d.wind_speed_10m;
+      if (w <= 8) score += 25;
+      else if (w <= 15) score += 20;
+      else if (w <= 25) score += 10;
+      else score += 0;
+
+      // Cloud cover: overcast/cloudy is generally better (fish less spooked)
+      const cc = d.cloud_cover;
+      if (cc >= 50 && cc <= 90) score += 20;
+      else if (cc >= 30) score += 15;
+      else score += 8;
+
+      // Precipitation: light rain can be great, heavy rain is bad
+      const pr = d.precipitation;
+      if (pr > 0 && pr <= 2) score += 15;   // light rain/drizzle = excellent
+      else if (pr === 0) score += 10;
+      else if (pr <= 5) score += 8;
+      else score += 0;                       // heavy rain
+
+      // Temperature: fish are most active 10-22°C (trout especially)
+      const t = d.temperature_2m;
+      if (t >= 12 && t <= 20) score += 10;
+      else if (t >= 8 && t <= 25) score += 7;
+      else if (t >= 4 && t <= 30) score += 3;
+      else score += 0;
+
+      return Math.min(100, Math.max(0, score));
+    }
+
+    // --- Wind direction helpers ---
+    function windDirToArrow(deg) {
+      // Arrows point in the direction wind is blowing TO
+      // (meteorological convention: 0° = from N, so arrow points S → ↓)
+      const arrows = ['↓','↙','←','↖','↑','↗','→','↘'];
+      const idx = Math.round(deg / 45) % 8;
+      return arrows[idx];
+    }
+
+    function windDirToCompass(deg) {
+      const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+      return dirs[Math.round(deg / 45) % 8];
+    }
+
     // --- Cache ---
-    // Key: "variable|lat|lon" -> { value, timestamp }
+    // Key: "lat|lon" -> { data: {temp, wind, windDir, pressure, precip, cloud}, timestamp }
     const cache = new Map();
 
-    function cacheKey(variable, lat, lon) {
-      return `${variable}|${lat}|${lon}`;
-    }
+    function cacheKey(lat, lon) { return `${lat}|${lon}`; }
 
-    function cacheGet(variable, lat, lon) {
-      const key = cacheKey(variable, lat, lon);
-      const entry = cache.get(key);
+    function cacheGet(lat, lon) {
+      const entry = cache.get(cacheKey(lat, lon));
       if (!entry) return undefined;
       if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-        cache.delete(key);
+        cache.delete(cacheKey(lat, lon));
         return undefined;
       }
-      return entry.value;
+      return entry.data;
     }
 
-    function cachePut(variable, lat, lon, value) {
-      // Evict oldest entries if cache is too large
+    function cachePut(lat, lon, data) {
       if (cache.size >= CACHE_MAX_ENTRIES) {
-        let oldest = null, oldestKey = null;
+        // Evict oldest
+        let oldestKey = null, oldestTs = Infinity;
         for (const [k, v] of cache) {
-          if (!oldest || v.timestamp < oldest) { oldest = v.timestamp; oldestKey = k; }
+          if (v.timestamp < oldestTs) { oldestTs = v.timestamp; oldestKey = k; }
         }
         if (oldestKey) cache.delete(oldestKey);
       }
-      cache.set(cacheKey(variable, lat, lon), { value, timestamp: Date.now() });
+      cache.set(cacheKey(lat, lon), { data, timestamp: Date.now() });
     }
 
-    function cacheStats() {
-      let valid = 0;
+    function cacheValidCount() {
+      let n = 0;
       const now = Date.now();
       for (const v of cache.values()) {
-        if (now - v.timestamp <= CACHE_TTL_MS) valid++;
+        if (now - v.timestamp <= CACHE_TTL_MS) n++;
       }
-      return { total: cache.size, valid };
+      return n;
     }
 
-    // --- Map setup ---
-    const map = L.map('map', {
-      center: BULGARIA_CENTER,
-      zoom: INITIAL_ZOOM,
-      minZoom: 6,
-      maxZoom: 13,
-    });
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | Weather: <a href="https://open-meteo.com/">Open-Meteo</a>',
-      maxZoom: 19,
-    }).addTo(map);
-
-    // --- State ---
-    let weatherLayer = L.layerGroup().addTo(map);
-    let currentAbort = null;
-    let debounceTimer = null;
-    // Store last rendered data so opacity changes don't need a refetch
-    let lastRenderData = null;
-
-    // --- Helpers ---
-
+    // --- Color interpolation ---
     function getColor(value, stops) {
       if (value <= stops[0].val) return stops[0].color;
       if (value >= stops[stops.length - 1].val) return stops[stops.length - 1].color;
@@ -257,15 +332,35 @@
 
     function rgbStr(c, a) { return `rgba(${c[0]},${c[1]},${c[2]},${a})`; }
 
-    // Grid step in degrees based on zoom level (coarser to reduce requests)
+    // --- Map setup ---
+    const map = L.map('map', {
+      center: BULGARIA_CENTER,
+      zoom: INITIAL_ZOOM,
+      minZoom: 6,
+      maxZoom: 13,
+    });
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> | <a href="https://open-meteo.com/">Open-Meteo</a>',
+      maxZoom: 19,
+    }).addTo(map);
+
+    // --- State ---
+    let rectLayer = L.layerGroup().addTo(map);
+    let labelLayer = L.layerGroup().addTo(map);
+    let currentAbort = null;
+    let debounceTimer = null;
+    let lastRenderData = null; // { points: [...], step }
+
+    // --- Grid ---
     function getGridStep(zoom) {
-      if (zoom >= 12) return 0.03;  // ~3 km
-      if (zoom >= 11) return 0.06;  // ~6 km
-      if (zoom >= 10) return 0.1;   // ~10 km
-      if (zoom >= 9)  return 0.15;  // ~15 km
-      if (zoom >= 8)  return 0.2;   // ~20 km
-      if (zoom >= 7)  return 0.35;  // ~35 km
-      return 0.5;                    // ~50 km
+      if (zoom >= 12) return 0.03;
+      if (zoom >= 11) return 0.06;
+      if (zoom >= 10) return 0.1;
+      if (zoom >= 9)  return 0.15;
+      if (zoom >= 8)  return 0.2;
+      if (zoom >= 7)  return 0.35;
+      return 0.5;
     }
 
     function buildGrid(bounds, step) {
@@ -274,7 +369,6 @@
       const north = Math.ceil(bounds.getNorth() / step) * step;
       const west = Math.floor(bounds.getWest() / step) * step;
       const east = Math.ceil(bounds.getEast() / step) * step;
-
       for (let lat = south; lat <= north; lat += step) {
         for (let lon = west; lon <= east; lon += step) {
           points.push({ lat: Math.round(lat * 1000) / 1000, lon: Math.round(lon * 1000) / 1000 });
@@ -285,8 +379,7 @@
 
     function getCurrentHourIndex(times) {
       const now = new Date();
-      let bestIdx = 0;
-      let bestDiff = Infinity;
+      let bestIdx = 0, bestDiff = Infinity;
       for (let i = 0; i < times.length; i++) {
         const diff = Math.abs(new Date(times[i]).getTime() - now.getTime());
         if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
@@ -296,18 +389,16 @@
 
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-    // Fetch with retry + exponential backoff for 429s
+    // --- API ---
     async function fetchWithRetry(url, signal) {
       for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
         const resp = await fetch(url, { signal });
         if (resp.ok) return resp;
         if (resp.status === 429 && attempt < MAX_RETRIES) {
-          const retryAfter = resp.headers.get('Retry-After');
-          const waitMs = retryAfter
-            ? parseInt(retryAfter, 10) * 1000
-            : Math.min(2000 * Math.pow(2, attempt), 16000);
-          console.warn(`429 rate-limited, retrying in ${waitMs}ms (attempt ${attempt + 1}/${MAX_RETRIES})`);
-          await sleep(waitMs);
+          const ra = resp.headers.get('Retry-After');
+          const wait = ra ? parseInt(ra, 10) * 1000 : Math.min(2000 * Math.pow(2, attempt), 16000);
+          console.warn(`429 → retry in ${wait}ms (${attempt + 1}/${MAX_RETRIES})`);
+          await sleep(wait);
           continue;
         }
         throw new Error(`API error: ${resp.status}`);
@@ -315,132 +406,173 @@
       throw new Error('Max retries exceeded (429)');
     }
 
-    // Fetch weather for a batch of points (only those not cached)
-    async function fetchBatch(points, variable, signal) {
+    // Fetch ALL fishing variables for a batch of points in ONE request
+    async function fetchBatch(points, signal) {
       const lats = points.map(p => p.lat).join(',');
       const lons = points.map(p => p.lon).join(',');
-      const url = `${API_BASE}?latitude=${lats}&longitude=${lons}&hourly=${variable}&forecast_days=1&timezone=auto`;
+      const url = `${API_BASE}?latitude=${lats}&longitude=${lons}&hourly=${HOURLY_VARS}&forecast_days=1&timezone=auto`;
 
       const resp = await fetchWithRetry(url, signal);
-      const data = await resp.json();
+      const raw = await resp.json();
+      const results = Array.isArray(raw) ? raw : [raw];
 
-      const results = Array.isArray(data) ? data : [data];
       return results.map((r, i) => {
-        const hourIdx = getCurrentHourIndex(r.hourly.time);
-        const value = r.hourly[variable][hourIdx];
-        // Store in cache
-        cachePut(variable, points[i].lat, points[i].lon, value);
-        return {
-          lat: points[i].lat,
-          lon: points[i].lon,
-          value,
+        const hi = getCurrentHourIndex(r.hourly.time);
+        const data = {
+          temperature_2m:     r.hourly.temperature_2m[hi],
+          wind_speed_10m:     r.hourly.wind_speed_10m[hi],
+          wind_direction_10m: r.hourly.wind_direction_10m[hi],
+          surface_pressure:   r.hourly.surface_pressure[hi],
+          precipitation:      r.hourly.precipitation[hi],
+          cloud_cover:        r.hourly.cloud_cover[hi],
         };
+        data.fish_score = computeFishScore(data);
+        cachePut(points[i].lat, points[i].lon, data);
+        return { lat: points[i].lat, lon: points[i].lon, data };
       });
     }
 
-    // Render data points onto the map (no fetching)
-    function renderOverlay(dataPoints, variable, step) {
-      weatherLayer.clearLayers();
-      const varMeta = VARIABLES[variable];
+    // --- Render ---
+    function renderOverlay(dataPoints, step) {
+      rectLayer.clearLayers();
+      labelLayer.clearLayers();
+
+      const colorBy = document.getElementById('colorBy').value;
       const opacity = parseFloat(document.getElementById('opacity').value);
+      const fontSize = parseInt(document.getElementById('fontSize').value);
+      const scale = COLOR_SCALES[colorBy];
       const halfCell = step / 2;
+      const zoom = map.getZoom();
 
       for (const pt of dataPoints) {
-        if (pt.value === null || pt.value === undefined) continue;
-        const color = getColor(pt.value, varMeta.stops);
+        const d = pt.data;
+        if (!d) continue;
+
+        // Colored rectangle
+        const colorVal = (colorBy === 'fish_score') ? d.fish_score : d[colorBy];
+        if (colorVal === null || colorVal === undefined) continue;
+        const color = getColor(colorVal, scale.stops);
+
         const rect = L.rectangle(
           [[pt.lat - halfCell, pt.lon - halfCell], [pt.lat + halfCell, pt.lon + halfCell]],
-          {
-            color: rgbStr(color, opacity + 0.15),
-            weight: 0,
-            fillColor: rgbStr(color, 1),
-            fillOpacity: opacity,
-          }
+          { color: 'transparent', weight: 0, fillColor: rgbStr(color, 1), fillOpacity: opacity }
         );
-        rect.bindPopup(`<b>${variable.replace(/_/g, ' ')}</b><br>
-          ${pt.value.toFixed(1)} ${varMeta.unit}<br>
-          <small>(${pt.lat.toFixed(3)}, ${pt.lon.toFixed(3)})</small>`);
-        weatherLayer.addLayer(rect);
+        rectLayer.addLayer(rect);
+
+        // Build label HTML
+        const arrow = windDirToArrow(d.wind_direction_10m);
+        const compass = windDirToCompass(d.wind_direction_10m);
+        const scoreClass = d.fish_score >= 65 ? 'fish-score-good'
+          : d.fish_score >= 40 ? 'fish-score-ok' : 'fish-score-poor';
+
+        let labelHtml;
+        if (zoom >= 10) {
+          // Detailed view
+          labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
+            `<span class="fish-score ${scoreClass}">${d.fish_score}</span> ` +
+            `<span class="wind-arrow">${arrow}</span>${d.wind_speed_10m.toFixed(0)}` +
+            `<br>${d.temperature_2m.toFixed(1)}° ${d.surface_pressure.toFixed(0)}hPa` +
+            `<br>${d.precipitation.toFixed(1)}mm ☁${d.cloud_cover}%` +
+            `</div>`;
+        } else if (zoom >= 8) {
+          // Medium view
+          labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
+            `<span class="fish-score ${scoreClass}">${d.fish_score}</span> ` +
+            `<span class="wind-arrow">${arrow}</span>${d.wind_speed_10m.toFixed(0)}` +
+            `<br>${d.temperature_2m.toFixed(0)}° ${d.surface_pressure.toFixed(0)}` +
+            `</div>`;
+        } else {
+          // Minimal view
+          labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
+            `<span class="fish-score ${scoreClass}">${d.fish_score}</span> ` +
+            `<span class="wind-arrow">${arrow}</span>` +
+            `</div>`;
+        }
+
+        const icon = L.divIcon({
+          html: labelHtml,
+          className: '',
+          iconSize: null,
+          iconAnchor: [0, 0],
+        });
+        const marker = L.marker([pt.lat, pt.lon], {
+          icon,
+          interactive: true,
+          keyboard: false,
+        });
+
+        // Popup with full details
+        marker.bindPopup(
+          `<b>Fishing Score: <span class="${scoreClass}">${d.fish_score}/100</span></b><br>` +
+          `<b>Wind:</b> ${d.wind_speed_10m.toFixed(1)} km/h ${compass} (${d.wind_direction_10m}°) ${arrow}<br>` +
+          `<b>Temp:</b> ${d.temperature_2m.toFixed(1)} °C<br>` +
+          `<b>Pressure:</b> ${d.surface_pressure.toFixed(1)} hPa<br>` +
+          `<b>Rain:</b> ${d.precipitation.toFixed(1)} mm<br>` +
+          `<b>Cloud:</b> ${d.cloud_cover}%<br>` +
+          `<small>(${pt.lat.toFixed(3)}, ${pt.lon.toFixed(3)})</small>`
+        );
+        labelLayer.addLayer(marker);
       }
     }
 
-    // Main data loading function
+    // --- Main loader ---
     async function loadWeatherData(forceRefresh = false) {
       if (currentAbort) currentAbort.abort();
-      const abortController = new AbortController();
-      currentAbort = abortController;
+      const ac = new AbortController();
+      currentAbort = ac;
 
-      const variable = document.getElementById('variable').value;
       const zoom = map.getZoom();
       const bounds = map.getBounds();
       const step = getGridStep(zoom);
       const points = buildGrid(bounds, step);
-
       const statusEl = document.getElementById('status');
 
-      // Split points into cached vs uncached
-      const cachedResults = [];
-      const uncachedPoints = [];
+      // Split cached vs uncached
+      const cached = [], uncached = [];
       for (const pt of points) {
-        const val = forceRefresh ? undefined : cacheGet(variable, pt.lat, pt.lon);
-        if (val !== undefined) {
-          cachedResults.push({ lat: pt.lat, lon: pt.lon, value: val });
+        const d = forceRefresh ? undefined : cacheGet(pt.lat, pt.lon);
+        if (d !== undefined) {
+          cached.push({ lat: pt.lat, lon: pt.lon, data: d });
         } else {
-          uncachedPoints.push(pt);
+          uncached.push(pt);
         }
       }
 
-      const stats = cacheStats();
-      statusEl.textContent = `${cachedResults.length} cached, ${uncachedPoints.length} to fetch (cache: ${stats.valid} entries)`;
+      statusEl.textContent = `${cached.length} cached, ${uncached.length} to fetch...`;
 
-      // If everything is cached, just render
-      if (uncachedPoints.length === 0) {
-        lastRenderData = { points: cachedResults, variable, step };
-        renderOverlay(cachedResults, variable, step);
-        updateLegend(variable);
-        statusEl.textContent = `Showing ${cachedResults.length} points (all from cache) | Zoom: ${zoom} | Grid: ~${(step * 111).toFixed(0)} km`;
+      // Render cached immediately
+      if (uncached.length === 0) {
+        lastRenderData = { points: cached, step };
+        renderOverlay(cached, step);
+        updateLegend();
+        statusEl.textContent = `${cached.length} pts (all cached) | z${zoom} ~${(step * 111).toFixed(0)}km | cache: ${cacheValidCount()}`;
         return;
       }
 
-      // Render cached data immediately so the user sees something
-      if (cachedResults.length > 0) {
-        renderOverlay(cachedResults, variable, step);
-      } else {
-        weatherLayer.clearLayers();
-      }
+      if (cached.length > 0) renderOverlay(cached, step);
+      else { rectLayer.clearLayers(); labelLayer.clearLayers(); }
 
       try {
-        // Batch uncached points
         const batches = [];
-        for (let i = 0; i < uncachedPoints.length; i += MAX_POINTS_PER_REQUEST) {
-          batches.push(uncachedPoints.slice(i, i + MAX_POINTS_PER_REQUEST));
+        for (let i = 0; i < uncached.length; i += MAX_POINTS_PER_REQUEST) {
+          batches.push(uncached.slice(i, i + MAX_POINTS_PER_REQUEST));
         }
 
-        const allResults = [...cachedResults];
+        const all = [...cached];
         for (let i = 0; i < batches.length; i++) {
-          if (abortController.signal.aborted) return;
-          statusEl.textContent = `Fetching batch ${i + 1}/${batches.length} (${uncachedPoints.length} new points, ${cachedResults.length} cached)...`;
-          const results = await fetchBatch(batches[i], variable, abortController.signal);
-          allResults.push(...results);
-
-          // Progressive render: update map after each batch
-          if (!abortController.signal.aborted) {
-            renderOverlay(allResults, variable, step);
-          }
-
-          // Delay between batches to avoid hammering the API
-          if (i < batches.length - 1) {
-            await sleep(BATCH_DELAY_MS);
-          }
+          if (ac.signal.aborted) return;
+          statusEl.textContent = `Batch ${i + 1}/${batches.length} (${uncached.length} new, ${cached.length} cached)...`;
+          const results = await fetchBatch(batches[i], ac.signal);
+          all.push(...results);
+          if (!ac.signal.aborted) renderOverlay(all, step);
+          if (i < batches.length - 1) await sleep(BATCH_DELAY_MS);
         }
 
-        if (abortController.signal.aborted) return;
-
-        lastRenderData = { points: allResults, variable, step };
-        renderOverlay(allResults, variable, step);
-        updateLegend(variable);
-        const s = cacheStats();
-        statusEl.textContent = `Showing ${allResults.length} points (${cachedResults.length} cached, ${uncachedPoints.length} fetched) | Zoom: ${zoom} | Grid: ~${(step * 111).toFixed(0)} km | Cache: ${s.valid}`;
+        if (ac.signal.aborted) return;
+        lastRenderData = { points: all, step };
+        renderOverlay(all, step);
+        updateLegend();
+        statusEl.textContent = `${all.length} pts (${cached.length} cached + ${uncached.length} new) | z${zoom} ~${(step * 111).toFixed(0)}km | cache: ${cacheValidCount()}`;
       } catch (err) {
         if (err.name === 'AbortError') return;
         console.error(err);
@@ -448,21 +580,46 @@
       }
     }
 
-    function updateLegend(variable) {
-      const meta = VARIABLES[variable];
-      const legendEl = document.getElementById('legend');
-      let html = `<div class="legend-title">${variable.replace(/_/g, ' ')} (${meta.unit})</div>`;
-      for (const stop of meta.stops) {
-        const c = stop.color;
+    function updateLegend() {
+      const colorBy = document.getElementById('colorBy').value;
+      const scale = COLOR_SCALES[colorBy];
+      const el = document.getElementById('legend');
+
+      let html = `<div class="legend-section">`;
+      html += `<div class="legend-title">${scale.label} ${scale.unit ? '(' + scale.unit + ')' : ''}</div>`;
+      for (const s of scale.stops) {
         html += `<div class="legend-row">
-          <div class="legend-color" style="background:rgb(${c[0]},${c[1]},${c[2]})"></div>
-          ${stop.val} ${meta.unit}
+          <div class="legend-color" style="background:rgb(${s.color.join(',')})"></div>
+          ${s.val}${scale.unit ? ' ' + scale.unit : ''}
         </div>`;
       }
-      legendEl.innerHTML = html;
+      html += `</div>`;
+
+      html += `<div class="legend-section">`;
+      html += `<div class="legend-title">Tile Labels</div>`;
+      html += `<div style="font-size:11px;line-height:1.4">`;
+      html += `<b>Score</b> = fishing score (0-100)<br>`;
+      html += `<b>Arrow</b> = wind direction<br>`;
+      html += `<b>Number after arrow</b> = wind km/h<br>`;
+      html += `<b>°</b> = temperature °C<br>`;
+      html += `<b>hPa</b> = atm. pressure<br>`;
+      html += `<b>mm</b> = precipitation<br>`;
+      html += `<b>☁</b> = cloud cover %`;
+      html += `</div></div>`;
+
+      html += `<div class="legend-section">`;
+      html += `<div class="legend-title">Fishing Score Guide</div>`;
+      html += `<div style="font-size:11px;line-height:1.5">`;
+      html += `<span class="fish-score-good"><b>65+</b> Great</span><br>`;
+      html += `<span class="fish-score-ok"><b>40-64</b> Fair</span><br>`;
+      html += `<span class="fish-score-poor"><b>&lt;40</b> Poor</span><br>`;
+      html += `<br>Best: 1010-1020 hPa,<br>wind &lt;15 km/h,<br>overcast, light rain,<br>12-20°C`;
+      html += `</div></div>`;
+
+      el.innerHTML = html;
     }
 
-    // --- Event listeners ---
+    // --- Events ---
     function debouncedLoad() {
       clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => loadWeatherData(false), 800);
@@ -471,22 +628,24 @@
     map.on('moveend', debouncedLoad);
     map.on('zoomend', debouncedLoad);
 
-    document.getElementById('variable').addEventListener('change', () => loadWeatherData(false));
-
-    // Opacity slider: re-render from lastRenderData without any fetch
-    document.getElementById('opacity').addEventListener('input', () => {
+    document.getElementById('colorBy').addEventListener('change', () => {
       if (lastRenderData) {
-        renderOverlay(lastRenderData.points, lastRenderData.variable, lastRenderData.step);
+        renderOverlay(lastRenderData.points, lastRenderData.step);
+        updateLegend();
       }
     });
 
-    // Refresh button forces cache bypass
+    document.getElementById('opacity').addEventListener('input', () => {
+      if (lastRenderData) renderOverlay(lastRenderData.points, lastRenderData.step);
+    });
+
+    document.getElementById('fontSize').addEventListener('input', () => {
+      if (lastRenderData) renderOverlay(lastRenderData.points, lastRenderData.step);
+    });
+
     document.getElementById('refresh').addEventListener('click', () => loadWeatherData(true));
 
-    // Initial legend
-    updateLegend('temperature_2m');
-
-    // Load data after a short delay to let map settle
+    updateLegend();
     setTimeout(() => loadWeatherData(false), 500);
   </script>
 </body>
