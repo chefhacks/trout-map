@@ -10,79 +10,140 @@
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     #map { width: 100%; height: 100vh; }
 
-    .controls {
+    /* --- Toggle button --- */
+    .panel-toggle {
       position: absolute;
       top: 10px;
       right: 10px;
-      z-index: 1000;
-      background: white;
+      z-index: 1002;
+      width: 40px;
+      height: 40px;
+      border: none;
       border-radius: 8px;
-      padding: 12px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      font-size: 13px;
-      max-width: 230px;
+      background: white;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.25);
+      font-size: 20px;
+      line-height: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.15s;
+      -webkit-tap-highlight-color: transparent;
     }
-    .controls label {
+    .panel-toggle:hover { background: #f0f0f0; }
+    .panel-toggle:active { background: #e0e0e0; }
+
+    /* --- Side panel --- */
+    .side-panel {
+      position: absolute;
+      top: 0; right: 0;
+      z-index: 1001;
+      width: 260px;
+      max-width: 85vw;
+      height: 100%;
+      background: white;
+      box-shadow: -2px 0 12px rgba(0,0,0,0.2);
+      overflow-y: auto;
+      overflow-x: hidden;
+      transform: translateX(100%);
+      transition: transform 0.25s ease;
+      -webkit-overflow-scrolling: touch;
+    }
+    .side-panel.open { transform: translateX(0); }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 14px 8px;
+      border-bottom: 1px solid #eee;
+      position: sticky;
+      top: 0;
+      background: white;
+      z-index: 1;
+    }
+    .panel-header h2 { font-size: 15px; font-weight: 700; }
+    .panel-close {
+      width: 32px; height: 32px;
+      border: none; border-radius: 6px;
+      background: transparent;
+      font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .panel-close:hover { background: #f0f0f0; }
+
+    .panel-body { padding: 10px 14px 20px; font-size: 13px; }
+
+    .panel-section {
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+    }
+    .panel-section:last-child { border-bottom: none; margin-bottom: 0; }
+    .panel-section-title {
+      font-weight: 700;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #555;
+      margin-bottom: 8px;
+    }
+
+    .panel-body label {
       display: block;
-      margin-bottom: 4px;
+      margin-bottom: 3px;
       font-weight: 600;
+      font-size: 12px;
     }
-    .controls select, .controls input[type=range] {
+    .panel-body select, .panel-body input[type=range] {
       width: 100%;
-      padding: 4px 6px;
+      padding: 5px 6px;
       margin-bottom: 8px;
       border-radius: 4px;
       border: 1px solid #ccc;
+      font-size: 13px;
     }
-    .controls button {
+    .panel-body .btn {
       width: 100%;
-      padding: 6px;
+      padding: 8px;
       border: none;
-      border-radius: 4px;
+      border-radius: 6px;
       background: #2563eb;
       color: white;
       cursor: pointer;
       font-weight: 600;
-      margin-bottom: 4px;
+      font-size: 13px;
+      -webkit-tap-highlight-color: transparent;
     }
-    .controls button:hover { background: #1d4ed8; }
+    .panel-body .btn:hover { background: #1d4ed8; }
+    .panel-body .btn:active { background: #1e40af; }
 
-    .legend {
-      position: absolute;
-      bottom: 30px;
-      right: 10px;
-      z-index: 1000;
-      background: white;
-      border-radius: 8px;
-      padding: 10px 12px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      font-size: 12px;
-      max-height: 50vh;
-      overflow-y: auto;
-    }
-    .legend-title { font-weight: 600; margin-bottom: 6px; }
-    .legend-row { display: flex; align-items: center; margin: 2px 0; }
+    .legend-row { display: flex; align-items: center; margin: 2px 0; font-size: 12px; }
     .legend-color {
       width: 20px; height: 14px; margin-right: 6px;
       border-radius: 2px; border: 1px solid rgba(0,0,0,0.1);
+      flex-shrink: 0;
     }
-    .legend-section { margin-top: 8px; padding-top: 6px; border-top: 1px solid #eee; }
-    .legend-section:first-child { margin-top: 0; padding-top: 0; border-top: none; }
 
+    /* --- Status bar --- */
     .status {
       position: absolute;
-      bottom: 30px;
-      left: 10px;
+      bottom: 8px;
+      left: 8px;
+      right: 8px;
       z-index: 1000;
-      background: white;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border-radius: 8px;
-      padding: 8px 12px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-      font-size: 12px;
-      max-width: 420px;
+      padding: 6px 10px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.15);
+      font-size: 11px;
+      text-align: center;
+      pointer-events: none;
     }
 
-    /* Tile text labels */
+    /* --- Tile text labels --- */
     .tile-label {
       font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
       line-height: 1.2;
@@ -96,35 +157,81 @@
       vertical-align: middle;
       line-height: 1;
     }
-    .tile-label .fish-score {
-      font-weight: 700;
-    }
+    .tile-label .fish-score { font-weight: 700; }
     .fish-score-good { color: #16a34a; }
     .fish-score-ok { color: #ca8a04; }
     .fish-score-poor { color: #dc2626; }
+
+    /* Dim overlay behind panel on mobile */
+    .panel-backdrop {
+      display: none;
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      z-index: 1000;
+      background: rgba(0,0,0,0.3);
+    }
+    .panel-backdrop.visible { display: block; }
   </style>
 </head>
 <body>
   <div id="map"></div>
 
-  <div class="controls">
-    <label for="colorBy">Color tiles by</label>
-    <select id="colorBy">
-      <option value="fish_score">Fishing Score</option>
-      <option value="temperature_2m">Temperature</option>
-      <option value="surface_pressure">Pressure</option>
-      <option value="wind_speed_10m">Wind Speed</option>
-      <option value="precipitation">Precipitation</option>
-      <option value="cloud_cover">Cloud Cover</option>
-    </select>
-    <label for="opacity">Overlay opacity</label>
-    <input type="range" id="opacity" min="0.05" max="0.85" step="0.05" value="0.35">
-    <label for="fontSize">Label size</label>
-    <input type="range" id="fontSize" min="7" max="14" step="1" value="10">
-    <button id="refresh">Refresh (bypass cache)</button>
+  <button class="panel-toggle" id="panelToggle" aria-label="Open settings">&#9776;</button>
+  <div class="panel-backdrop" id="panelBackdrop"></div>
+
+  <div class="side-panel" id="sidePanel">
+    <div class="panel-header">
+      <h2>Fishing Weather</h2>
+      <button class="panel-close" id="panelClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="panel-body">
+
+      <div class="panel-section">
+        <div class="panel-section-title">Controls</div>
+        <label for="colorBy">Color tiles by</label>
+        <select id="colorBy">
+          <option value="fish_score">Fishing Score</option>
+          <option value="temperature_2m">Temperature</option>
+          <option value="surface_pressure">Pressure</option>
+          <option value="wind_speed_10m">Wind Speed</option>
+          <option value="precipitation">Precipitation</option>
+          <option value="cloud_cover">Cloud Cover</option>
+        </select>
+        <label for="opacity">Overlay opacity</label>
+        <input type="range" id="opacity" min="0.05" max="0.85" step="0.05" value="0.35">
+        <label for="fontSize">Label size</label>
+        <input type="range" id="fontSize" min="7" max="14" step="1" value="10">
+        <button class="btn" id="refresh">Refresh (bypass cache)</button>
+      </div>
+
+      <div class="panel-section" id="legendScale"></div>
+
+      <div class="panel-section">
+        <div class="panel-section-title">Tile Labels</div>
+        <div style="font-size:11px;line-height:1.5">
+          <b>Score</b> = fishing score (0-100)<br>
+          <b>Arrow</b> = wind direction<br>
+          <b>Number after arrow</b> = wind km/h<br>
+          <b>&deg;</b> = temperature &deg;C<br>
+          <b>hPa</b> = atm. pressure<br>
+          <b>mm</b> = precipitation<br>
+          <b>&#9729;</b> = cloud cover %
+        </div>
+      </div>
+
+      <div class="panel-section">
+        <div class="panel-section-title">Fishing Score Guide</div>
+        <div style="font-size:11px;line-height:1.5">
+          <span class="fish-score-good"><b>65+</b> Great</span><br>
+          <span class="fish-score-ok"><b>40-64</b> Fair</span><br>
+          <span class="fish-score-poor"><b>&lt;40</b> Poor</span><br>
+          <br>Best: 1010-1020 hPa,<br>wind &lt;15 km/h,<br>overcast, light rain,<br>12-20&deg;C
+        </div>
+      </div>
+
+    </div>
   </div>
 
-  <div class="legend" id="legend"></div>
   <div class="status" id="status">Zoom or pan to load weather data</div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -583,41 +690,38 @@
     function updateLegend() {
       const colorBy = document.getElementById('colorBy').value;
       const scale = COLOR_SCALES[colorBy];
-      const el = document.getElementById('legend');
+      const el = document.getElementById('legendScale');
 
-      let html = `<div class="legend-section">`;
-      html += `<div class="legend-title">${scale.label} ${scale.unit ? '(' + scale.unit + ')' : ''}</div>`;
+      let html = `<div class="panel-section-title">${scale.label} ${scale.unit ? '(' + scale.unit + ')' : ''}</div>`;
       for (const s of scale.stops) {
         html += `<div class="legend-row">
           <div class="legend-color" style="background:rgb(${s.color.join(',')})"></div>
           ${s.val}${scale.unit ? ' ' + scale.unit : ''}
         </div>`;
       }
-      html += `</div>`;
-
-      html += `<div class="legend-section">`;
-      html += `<div class="legend-title">Tile Labels</div>`;
-      html += `<div style="font-size:11px;line-height:1.4">`;
-      html += `<b>Score</b> = fishing score (0-100)<br>`;
-      html += `<b>Arrow</b> = wind direction<br>`;
-      html += `<b>Number after arrow</b> = wind km/h<br>`;
-      html += `<b>°</b> = temperature °C<br>`;
-      html += `<b>hPa</b> = atm. pressure<br>`;
-      html += `<b>mm</b> = precipitation<br>`;
-      html += `<b>☁</b> = cloud cover %`;
-      html += `</div></div>`;
-
-      html += `<div class="legend-section">`;
-      html += `<div class="legend-title">Fishing Score Guide</div>`;
-      html += `<div style="font-size:11px;line-height:1.5">`;
-      html += `<span class="fish-score-good"><b>65+</b> Great</span><br>`;
-      html += `<span class="fish-score-ok"><b>40-64</b> Fair</span><br>`;
-      html += `<span class="fish-score-poor"><b>&lt;40</b> Poor</span><br>`;
-      html += `<br>Best: 1010-1020 hPa,<br>wind &lt;15 km/h,<br>overcast, light rain,<br>12-20°C`;
-      html += `</div></div>`;
-
       el.innerHTML = html;
     }
+
+    // --- Side panel toggle ---
+    const panel = document.getElementById('sidePanel');
+    const backdrop = document.getElementById('panelBackdrop');
+    const toggleBtn = document.getElementById('panelToggle');
+    const closeBtn = document.getElementById('panelClose');
+
+    function openPanel() {
+      panel.classList.add('open');
+      backdrop.classList.add('visible');
+      toggleBtn.style.display = 'none';
+    }
+    function closePanel() {
+      panel.classList.remove('open');
+      backdrop.classList.remove('visible');
+      toggleBtn.style.display = '';
+    }
+
+    toggleBtn.addEventListener('click', openPanel);
+    closeBtn.addEventListener('click', closePanel);
+    backdrop.addEventListener('click', closePanel);
 
     // --- Events ---
     function debouncedLoad() {
