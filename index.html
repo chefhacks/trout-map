@@ -579,6 +579,7 @@
 
         // Build label HTML
         const compass = windDirToCompass(d.wind_direction_10m);
+        const arrow = windDirToArrow(d.wind_direction_10m);
         // Wind direction: meteorological = "from", so rotate by deg (wind blows FROM this dir)
         // CSS rotate: 0deg = moving right, so we convert: met 0°=N(from N→blows S)
         // Streaks move in wind direction: rotate = windDir + 180° (direction wind goes TO)
