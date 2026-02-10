@@ -190,7 +190,6 @@
         <div class="panel-section-title">Controls</div>
         <label for="colorBy">Color tiles by</label>
         <select id="colorBy">
-          <option value="fish_score">Fishing Score</option>
           <option value="temperature_2m">Temperature</option>
           <option value="surface_pressure">Pressure</option>
           <option value="wind_speed_10m">Wind Speed</option>
@@ -311,16 +310,6 @@
           { val: 50,  color: [190, 190, 190] },
           { val: 75,  color: [140, 140, 150] },
           { val: 100, color: [90, 90, 110] },
-        ]
-      },
-      fish_score: {
-        unit: '', label: 'Fishing Score',
-        stops: [
-          { val: 0,  color: [215, 48, 39] },
-          { val: 25, color: [253, 174, 97] },
-          { val: 50, color: [255, 255, 191] },
-          { val: 75, color: [166, 217, 106] },
-          { val: 100, color: [26, 152, 80] },
         ]
       },
     };
@@ -556,7 +545,7 @@
         if (!d) continue;
 
         // Colored rectangle
-        const colorVal = (colorBy === 'fish_score') ? d.fish_score : d[colorBy];
+        const colorVal = d[colorBy];
         if (colorVal === null || colorVal === undefined) continue;
         const color = getColor(colorVal, scale.stops);
 
@@ -569,29 +558,27 @@
         // Build label HTML
         const arrow = windDirToArrow(d.wind_direction_10m);
         const compass = windDirToCompass(d.wind_direction_10m);
-        const scoreClass = d.fish_score >= 65 ? 'fish-score-good'
-          : d.fish_score >= 40 ? 'fish-score-ok' : 'fish-score-poor';
 
         let labelHtml;
         if (zoom >= 10) {
           // Detailed view
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            `<span class="fish-score ${scoreClass}">${d.fish_score}</span> ` +
+            `${d.temperature_2m.toFixed(1)}° ` +
             `<span class="wind-arrow">${arrow}</span>${d.wind_speed_10m.toFixed(0)}` +
-            `<br>${d.temperature_2m.toFixed(1)}° ${d.surface_pressure.toFixed(0)}hPa` +
-            `<br>${d.precipitation.toFixed(1)}mm ☁${d.cloud_cover}%` +
+            `<br>${d.surface_pressure.toFixed(0)}hPa ${d.precipitation.toFixed(1)}mm` +
+            `<br>☁${d.cloud_cover}%` +
             `</div>`;
         } else if (zoom >= 8) {
           // Medium view
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            `<span class="fish-score ${scoreClass}">${d.fish_score}</span> ` +
+            `${d.temperature_2m.toFixed(0)}° ` +
             `<span class="wind-arrow">${arrow}</span>${d.wind_speed_10m.toFixed(0)}` +
-            `<br>${d.temperature_2m.toFixed(0)}° ${d.surface_pressure.toFixed(0)}` +
+            `<br>${d.surface_pressure.toFixed(0)}hPa` +
             `</div>`;
         } else {
           // Minimal view
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            `<span class="fish-score ${scoreClass}">${d.fish_score}</span> ` +
+            `${d.temperature_2m.toFixed(0)}° ` +
             `<span class="wind-arrow">${arrow}</span>` +
             `</div>`;
         }
@@ -608,11 +595,13 @@
           keyboard: false,
         });
 
-        // Popup with full details
+        // Popup with full details (fishing score shown here only)
+        const scoreClass = d.fish_score >= 65 ? 'fish-score-good'
+          : d.fish_score >= 40 ? 'fish-score-ok' : 'fish-score-poor';
         marker.bindPopup(
           `<b>Fishing Score: <span class="${scoreClass}">${d.fish_score}/100</span></b><br>` +
-          `<b>Wind:</b> ${d.wind_speed_10m.toFixed(1)} km/h ${compass} (${d.wind_direction_10m}°) ${arrow}<br>` +
           `<b>Temp:</b> ${d.temperature_2m.toFixed(1)} °C<br>` +
+          `<b>Wind:</b> ${d.wind_speed_10m.toFixed(1)} km/h ${compass} (${d.wind_direction_10m}°) ${arrow}<br>` +
           `<b>Pressure:</b> ${d.surface_pressure.toFixed(1)} hPa<br>` +
           `<b>Rain:</b> ${d.precipitation.toFixed(1)} mm<br>` +
           `<b>Cloud:</b> ${d.cloud_cover}%<br>` +
