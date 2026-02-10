@@ -597,15 +597,13 @@
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
             windStreaks +
             `${d.temperature_2m.toFixed(1)}° ${d.wind_speed_10m.toFixed(0)} km/h` +
-            `<br>${d.surface_pressure.toFixed(0)}hPa ${d.precipitation.toFixed(1)}mm` +
-            `<br>☁${d.cloud_cover}%` +
+            `<br>${d.precipitation.toFixed(1)}mm ☁${d.cloud_cover}%` +
             `</div>`;
         } else if (zoom >= 8) {
           // Medium view
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
             windStreaks +
             `${d.temperature_2m.toFixed(0)}° ${d.wind_speed_10m.toFixed(0)} km/h` +
-            `<br>${d.surface_pressure.toFixed(0)}hPa` +
             `</div>`;
         } else {
           // Minimal view
