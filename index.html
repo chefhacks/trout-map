@@ -446,12 +446,16 @@
       wind_speed_10m: {
         unit: 'km/h', label: 'Wind Speed',
         stops: [
-          { val: 0,  color: [224, 243, 248] },
-          { val: 10, color: [171, 217, 233] },
-          { val: 20, color: [100, 180, 255] },
-          { val: 35, color: [30, 100, 200] },
-          { val: 50, color: [200, 80, 80] },
-          { val: 80, color: [150, 0, 0] },
+          { val: 0,   color: [230, 245, 230] },   // calm — pale green
+          { val: 3,   color: [180, 230, 180] },   // barely a breeze
+          { val: 6,   color: [140, 210, 160] },   // light breeze
+          { val: 10,  color: [255, 230, 130] },   // noticeable — yellow
+          { val: 15,  color: [255, 180, 80] },    // moderate — orange
+          { val: 20,  color: [240, 100, 60] },    // uncomfortable — red-orange
+          { val: 30,  color: [200, 50, 50] },     // strong — red
+          { val: 50,  color: [140, 20, 140] },    // very strong — purple
+          { val: 80,  color: [60, 0, 80] },       // storm — dark purple
+          { val: 100, color: [30, 0, 40] },       // extreme — near black
         ]
       },
       precipitation: {
