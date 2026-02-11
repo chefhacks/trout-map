@@ -175,22 +175,21 @@
       top: calc(var(--tile-size, 120px) / -2);
       left: calc(var(--tile-size, 120px) / -2);
       pointer-events: none;
-      overflow: hidden;
+      /* no overflow:hidden — streaks bleed across tiles */
     }
     .wind-streak {
       position: absolute;
       height: 2px;
       background: rgba(30,60,130,0.7);
       border-radius: 2px;
-      left: -20%;
       animation: streak-drift var(--streak-dur, 2s) linear infinite;
       animation-delay: var(--streak-delay, 0s);
     }
     @keyframes streak-drift {
       0%   { transform: translateX(0);   opacity: 0; }
-      8%   { opacity: 0.8; }
-      88%  { opacity: 0.8; }
-      100% { transform: translateX(var(--tile-size, 120px)); opacity: 0; }
+      5%   { opacity: 0.75; }
+      90%  { opacity: 0.75; }
+      100% { transform: translateX(var(--streak-travel, 150px)); opacity: 0; }
     }
 
     /* Dim overlay behind panel on mobile */
@@ -635,13 +634,15 @@
         const streakAngle = (d.wind_direction_10m + 90) % 360;
         const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
         const tileSize = Math.round(tilePx);
-        const streakCount = Math.min(20, Math.max(8, Math.round(tilePx / 8)));
-        let windStreaks = `<div class="wind-streaks" style="--tile-size:${tileSize}px;transform:rotate(${streakAngle}deg)">`;
+        const travel = Math.round(tilePx * 1.4);  // overshoot into next tile
+        const streakCount = Math.min(24, Math.max(10, Math.round(tilePx / 6)));
+        let windStreaks = `<div class="wind-streaks" style="--tile-size:${tileSize}px;--streak-travel:${travel}px;transform:rotate(${streakAngle}deg)">`;
         for (let s = 0; s < streakCount; s++) {
-          const topPct = (5 + (90 * s / (streakCount - 1))).toFixed(1);
-          const w = Math.round(8 + Math.random() * 14);
-          const delay = (parseFloat(streakDur) * s / streakCount).toFixed(2);
-          windStreaks += `<div class="wind-streak" style="top:${topPct}%;width:${w}px;--streak-dur:${streakDur}s;--streak-delay:${delay}s"></div>`;
+          const topPct = (Math.random() * 100).toFixed(1);
+          const startPct = (-20 + Math.random() * 80).toFixed(1);  // random start from -20% to 60%
+          const w = Math.round(10 + Math.random() * 16);
+          const delay = (Math.random() * parseFloat(streakDur)).toFixed(2);
+          windStreaks += `<div class="wind-streak" style="top:${topPct}%;left:${startPct}%;width:${w}px;--streak-dur:${streakDur}s;--streak-delay:${delay}s"></div>`;
         }
         windStreaks += `</div>`;
 
