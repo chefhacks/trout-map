@@ -634,7 +634,10 @@
         // Build label HTML
         const compass = windDirToCompass(d.wind_direction_10m);
         const arrow = windDirToArrow(d.wind_direction_10m);
-        const streakAngle = (d.wind_direction_10m + 180) % 360;
+        // Streaks animate left→right by default (= 90° compass heading).
+        // Meteorological wind_direction is "from" direction, so wind blows
+        // toward (deg + 180). Subtract 90 to align with the base animation.
+        const streakAngle = (d.wind_direction_10m + 90) % 360;
         const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
         let windStreaks = `<div class="wind-streaks" style="transform:rotate(${streakAngle}deg)">`;
         for (let s = 0; s < 10; s++) {
