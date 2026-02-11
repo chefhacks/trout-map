@@ -167,6 +167,107 @@
     .fish-score-ok { color: #ca8a04; }
     .fish-score-poor { color: #dc2626; }
 
+    /* --- Map toolbar (forecast + date buttons) --- */
+    .map-toolbar {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1002;
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+    }
+    .map-toolbar-group {
+      display: flex;
+      gap: 3px;
+      background: rgba(255,255,255,0.92);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      border-radius: 10px;
+      padding: 4px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+    .map-btn {
+      width: 36px;
+      height: 36px;
+      border: 2px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 17px;
+      line-height: 1;
+      transition: all 0.15s;
+      position: relative;
+      -webkit-tap-highlight-color: transparent;
+      color: #444;
+    }
+    .map-btn:hover { background: rgba(0,0,0,0.06); }
+    .map-btn.active {
+      background: #2563eb;
+      color: white;
+      border-color: #2563eb;
+      box-shadow: 0 1px 4px rgba(37,99,235,0.4);
+    }
+    .map-btn .btn-tip {
+      display: none;
+      position: absolute;
+      bottom: -22px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 9px;
+      white-space: nowrap;
+      background: rgba(0,0,0,0.75);
+      color: white;
+      padding: 2px 5px;
+      border-radius: 4px;
+      pointer-events: none;
+    }
+    .map-btn:hover .btn-tip { display: block; }
+
+    /* Date/time popover */
+    .date-popover {
+      display: none;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+      padding: 10px 12px;
+      min-width: 180px;
+      z-index: 1003;
+    }
+    .date-popover.open { display: block; }
+    .date-popover label {
+      display: block;
+      font-size: 11px;
+      font-weight: 700;
+      color: #555;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      margin-bottom: 3px;
+      margin-top: 6px;
+    }
+    .date-popover label:first-child { margin-top: 0; }
+    .date-popover select, .date-popover input[type=range] {
+      width: 100%;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+      font-size: 12px;
+      margin-bottom: 2px;
+    }
+    .date-popover .hour-display {
+      font-size: 12px;
+      font-weight: 600;
+      text-align: center;
+      color: #333;
+    }
+
     /* --- Animated wind streaks --- */
     .wind-streaks {
       position: absolute;
@@ -206,6 +307,39 @@
 <body>
   <div id="map"></div>
 
+  <!-- Map toolbar: forecast buttons + date picker -->
+  <div class="map-toolbar" id="mapToolbar">
+    <div class="map-toolbar-group" id="forecastBtns">
+      <button class="map-btn active" data-forecast="temperature_2m" title="Temperature">
+        &#127777;<span class="btn-tip">Temp</span>
+      </button>
+      <button class="map-btn" data-forecast="surface_pressure" title="Pressure">
+        &#9041;<span class="btn-tip">Pressure</span>
+      </button>
+      <button class="map-btn" data-forecast="wind_speed_10m" title="Wind">
+        &#127788;<span class="btn-tip">Wind</span>
+      </button>
+      <button class="map-btn" data-forecast="precipitation" title="Rain">
+        &#127783;<span class="btn-tip">Rain</span>
+      </button>
+      <button class="map-btn" data-forecast="cloud_cover" title="Clouds">
+        &#9729;<span class="btn-tip">Clouds</span>
+      </button>
+    </div>
+    <div class="map-toolbar-group" style="position:relative;">
+      <button class="map-btn" id="dateBtn" title="Date & Hour">
+        &#128197;<span class="btn-tip">Date</span>
+      </button>
+      <div class="date-popover" id="datePopover">
+        <label for="forecastDay">Day</label>
+        <select id="forecastDay"></select>
+        <label for="forecastHour">Hour</label>
+        <input type="range" id="forecastHour" min="0" max="23" step="1" value="12">
+        <div class="hour-display" id="forecastHourLabel">12:00</div>
+      </div>
+    </div>
+  </div>
+
   <button class="panel-toggle" id="panelToggle" aria-label="Open settings">&#9776;</button>
   <div class="panel-backdrop" id="panelBackdrop"></div>
 
@@ -216,20 +350,16 @@
     </div>
     <div class="panel-body">
 
+      <!-- Hidden select kept for JS compatibility -->
+      <select id="colorBy" style="display:none">
+        <option value="temperature_2m">Temperature</option>
+        <option value="surface_pressure">Pressure</option>
+        <option value="wind_speed_10m">Wind Speed</option>
+        <option value="precipitation">Precipitation</option>
+        <option value="cloud_cover">Cloud Cover</option>
+      </select>
       <div class="panel-section">
-        <div class="panel-section-title">Controls</div>
-        <label for="forecastDay">Day</label>
-        <select id="forecastDay"></select>
-        <label for="forecastHour">Hour: <span id="forecastHourLabel">Now</span></label>
-        <input type="range" id="forecastHour" min="0" max="23" step="1" value="12">
-        <label for="colorBy">Forecast</label>
-        <select id="colorBy">
-          <option value="temperature_2m">Temperature</option>
-          <option value="surface_pressure">Pressure</option>
-          <option value="wind_speed_10m">Wind Speed</option>
-          <option value="precipitation">Precipitation</option>
-          <option value="cloud_cover">Cloud Cover</option>
-        </select>
+        <div class="panel-section-title">Display</div>
         <label for="opacity">Overlay opacity</label>
         <input type="range" id="opacity" min="0.05" max="0.85" step="0.05" value="0.35">
         <label for="fontSize">Label size</label>
@@ -832,6 +962,40 @@
     closeBtn.addEventListener('click', closePanel);
     backdrop.addEventListener('click', closePanel);
 
+    // Prevent map drag/zoom through toolbar
+    const toolbar = document.getElementById('mapToolbar');
+    L.DomEvent.disableClickPropagation(toolbar);
+    L.DomEvent.disableScrollPropagation(toolbar);
+
+    // --- Map toolbar: forecast buttons ---
+    document.querySelectorAll('#forecastBtns .map-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('#forecastBtns .map-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('colorBy').value = btn.dataset.forecast;
+        document.getElementById('colorBy').dispatchEvent(new Event('change'));
+      });
+    });
+
+    // --- Map toolbar: date popover ---
+    const dateBtn = document.getElementById('dateBtn');
+    const datePopover = document.getElementById('datePopover');
+    dateBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = datePopover.classList.toggle('open');
+      dateBtn.classList.toggle('active', isOpen);
+    });
+    // Close popover when clicking outside
+    document.addEventListener('click', (e) => {
+      if (!datePopover.contains(e.target) && e.target !== dateBtn) {
+        datePopover.classList.remove('open');
+        dateBtn.classList.remove('active');
+      }
+    });
+    // Prevent map clicks through popover
+    datePopover.addEventListener('mousedown', e => e.stopPropagation());
+    datePopover.addEventListener('touchstart', e => e.stopPropagation());
+
     // --- Events ---
     function debouncedLoad() {
       clearTimeout(debounceTimer);
@@ -853,11 +1017,15 @@
       renderOverlay(pts, lastRenderData.step);
     }
 
-    // Update hour label display
+    // Update hour label display + date button indicator
     function updateHourLabel() {
       const hour = document.getElementById('forecastHour').value;
-      const dayVal = document.getElementById('forecastDay').value;
+      const dayEl = document.getElementById('forecastDay');
+      const dayText = dayEl.options[dayEl.selectedIndex]?.textContent || '';
       document.getElementById('forecastHourLabel').textContent = `${hour}:00`;
+      // Show abbreviated date on the button
+      const short = dayText === 'Today' ? 'Now' : dayText === 'Tomorrow' ? 'Tmrw' : dayText.slice(0, 6);
+      dateBtn.title = `${dayText} ${hour}:00`;
     }
 
     document.getElementById('forecastDay').addEventListener('change', () => {
