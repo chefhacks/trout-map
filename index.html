@@ -167,28 +167,41 @@
     .fish-score-ok { color: #ca8a04; }
     .fish-score-poor { color: #dc2626; }
 
-    /* --- Full-tile wind arrow field --- */
-    .wind-field {
+    /* --- Animated wind streaks --- */
+    .wind-streaks {
       position: absolute;
+      width: 56px;
+      height: 56px;
+      top: -28px;
+      left: -28px;
       pointer-events: none;
       overflow: hidden;
     }
-    .wind-arrow {
+    .wind-streak {
       position: absolute;
-      pointer-events: none;
-      font-size: var(--arrow-size, 14px);
-      color: rgba(20,50,120,0.7);
-      animation: arrow-pulse var(--arrow-dur, 2s) ease-in-out infinite;
-      animation-delay: var(--arrow-delay, 0s);
-      text-shadow: 0 0 2px rgba(255,255,255,0.6);
-      line-height: 1;
+      width: 18px;
+      height: 2.5px;
+      background: rgba(30,60,130,0.8);
+      border-radius: 2px;
+      top: 50%;
+      left: -18px;
+      animation: streak-drift var(--streak-dur, 2s) linear infinite;
+      animation-delay: var(--streak-delay, 0s);
     }
-    @keyframes arrow-pulse {
-      0%   { opacity: 0.15; transform: translate(var(--drift-x, 0px), var(--drift-y, 0px)) scale(0.8); }
-      25%  { opacity: 0.75; }
-      50%  { opacity: 0.85; transform: translate(0px, 0px) scale(1); }
-      75%  { opacity: 0.75; }
-      100% { opacity: 0.15; transform: translate(calc(-1 * var(--drift-x, 0px)), calc(-1 * var(--drift-y, 0px))) scale(0.8); }
+    .wind-streak:nth-child(2)  { top: 20%; width: 14px; }
+    .wind-streak:nth-child(3)  { top: 80%; width: 14px; }
+    .wind-streak:nth-child(4)  { top: 35%; width: 12px; }
+    .wind-streak:nth-child(5)  { top: 65%; width: 12px; }
+    .wind-streak:nth-child(6)  { top: 10%; width: 10px; }
+    .wind-streak:nth-child(7)  { top: 90%; width: 10px; }
+    .wind-streak:nth-child(8)  { top: 42%; width: 16px; }
+    .wind-streak:nth-child(9)  { top: 58%; width: 15px; }
+    .wind-streak:nth-child(10) { top: 75%; width: 11px; }
+    @keyframes streak-drift {
+      0%   { transform: translateX(0);   opacity: 0; }
+      10%  { opacity: 0.85; }
+      85%  { opacity: 0.85; }
+      100% { transform: translateX(72px); opacity: 0; }
     }
 
     /* Dim overlay behind panel on mobile */
@@ -583,43 +596,17 @@
         );
         rectLayer.addLayer(rect);
 
-        // Build wind arrow field covering full tile
+        // Build label HTML
         const compass = windDirToCompass(d.wind_direction_10m);
         const arrow = windDirToArrow(d.wind_direction_10m);
-
-        // Compute tile pixel dimensions
-        const sw = map.latLngToLayerPoint([pt.lat - halfCell, pt.lon - halfCell]);
-        const ne = map.latLngToLayerPoint([pt.lat + halfCell, pt.lon + halfCell]);
-        const tileW = Math.abs(ne.x - sw.x);
-        const tileH = Math.abs(ne.y - sw.y);
-
-        // Wind arrow rotation: wind blows FROM the given direction, arrows point where wind goes TO
-        const arrowAngle = (d.wind_direction_10m + 180) % 360;
-        const arrowChar = '&#10148;'; // heavy wide-headed rightwards arrow ➤
-        const arrowDur = Math.max(1.0, 4 - d.wind_speed_10m * 0.06).toFixed(1);
-        const arrowSize = Math.max(10, Math.min(20, tileW / 5));
-
-        // Drift direction based on wind angle (arrows sway in wind direction)
-        const rad = arrowAngle * Math.PI / 180;
-        const driftX = (Math.cos(rad) * 4).toFixed(1);
-        const driftY = (Math.sin(rad) * 4).toFixed(1);
-
-        // Generate grid of arrows across the tile
-        const cols = Math.max(2, Math.floor(tileW / 28));
-        const rows = Math.max(2, Math.floor(tileH / 28));
-        const cellW = tileW / cols;
-        const cellH = tileH / rows;
-
-        let windFieldHtml = `<div class="wind-field" style="width:${tileW}px;height:${tileH}px;top:${-(tileH/2)}px;left:${-(tileW/2)}px">`;
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            const x = (cellW * c + cellW * 0.5 - arrowSize * 0.5).toFixed(0);
-            const y = (cellH * r + cellH * 0.5 - arrowSize * 0.5).toFixed(0);
-            const delay = ((r * cols + c) * 0.3 % parseFloat(arrowDur)).toFixed(1);
-            windFieldHtml += `<div class="wind-arrow" style="left:${x}px;top:${y}px;--arrow-size:${arrowSize.toFixed(0)}px;--arrow-dur:${arrowDur}s;--arrow-delay:${delay}s;--drift-x:${driftX}px;--drift-y:${driftY}px;transform:rotate(${arrowAngle}deg)">${arrowChar}</div>`;
-          }
+        const streakAngle = (d.wind_direction_10m + 180) % 360;
+        const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
+        let windStreaks = `<div class="wind-streaks" style="transform:rotate(${streakAngle}deg)">`;
+        for (let s = 0; s < 10; s++) {
+          const delay = (streakDur * s * 0.1).toFixed(1);
+          windStreaks += `<div class="wind-streak" style="--streak-dur:${streakDur}s;--streak-delay:${delay}s"></div>`;
         }
-        windFieldHtml += '</div>';
+        windStreaks += `</div>`;
 
         // Primary value based on selected forecast
         let primaryText, secondaryText;
@@ -652,13 +639,13 @@
         let labelHtml;
         if (zoom >= 10) {
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            windFieldHtml +
+            windStreaks +
             `<span class="primary-val">${primaryText}</span>` +
             `<br>${secondaryText}` +
             `</div>`;
         } else {
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            windFieldHtml +
+            windStreaks +
             `<span class="primary-val">${primaryText}</span>` +
             `</div>`;
         }
