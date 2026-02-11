@@ -170,38 +170,27 @@
     /* --- Animated wind streaks --- */
     .wind-streaks {
       position: absolute;
-      width: 56px;
-      height: 56px;
-      top: -28px;
-      left: -28px;
+      width: var(--tile-size, 120px);
+      height: var(--tile-size, 120px);
+      top: calc(var(--tile-size, 120px) / -2);
+      left: calc(var(--tile-size, 120px) / -2);
       pointer-events: none;
       overflow: hidden;
     }
     .wind-streak {
       position: absolute;
-      width: 18px;
-      height: 2.5px;
-      background: rgba(30,60,130,0.8);
+      height: 2px;
+      background: rgba(30,60,130,0.7);
       border-radius: 2px;
-      top: 50%;
-      left: -18px;
+      left: -20%;
       animation: streak-drift var(--streak-dur, 2s) linear infinite;
       animation-delay: var(--streak-delay, 0s);
     }
-    .wind-streak:nth-child(2)  { top: 20%; width: 14px; }
-    .wind-streak:nth-child(3)  { top: 80%; width: 14px; }
-    .wind-streak:nth-child(4)  { top: 35%; width: 12px; }
-    .wind-streak:nth-child(5)  { top: 65%; width: 12px; }
-    .wind-streak:nth-child(6)  { top: 10%; width: 10px; }
-    .wind-streak:nth-child(7)  { top: 90%; width: 10px; }
-    .wind-streak:nth-child(8)  { top: 42%; width: 16px; }
-    .wind-streak:nth-child(9)  { top: 58%; width: 15px; }
-    .wind-streak:nth-child(10) { top: 75%; width: 11px; }
     @keyframes streak-drift {
       0%   { transform: translateX(0);   opacity: 0; }
-      10%  { opacity: 0.85; }
-      85%  { opacity: 0.85; }
-      100% { transform: translateX(72px); opacity: 0; }
+      8%   { opacity: 0.8; }
+      88%  { opacity: 0.8; }
+      100% { transform: translateX(var(--tile-size, 120px)); opacity: 0; }
     }
 
     /* Dim overlay behind panel on mobile */
@@ -616,6 +605,12 @@
       const halfCell = step / 2;
       const zoom = map.getZoom();
 
+      // Estimate tile pixel size from the grid step
+      const centerLat = map.getCenter().lat;
+      const p1 = map.latLngToContainerPoint([centerLat, 0]);
+      const p2 = map.latLngToContainerPoint([centerLat, step]);
+      const tilePx = Math.max(40, Math.abs(p2.x - p1.x));
+
       for (const pt of dataPoints) {
         const d = pt.data;
         if (!d) continue;
@@ -639,10 +634,14 @@
         // toward (deg + 180). Subtract 90 to align with the base animation.
         const streakAngle = (d.wind_direction_10m + 90) % 360;
         const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
-        let windStreaks = `<div class="wind-streaks" style="transform:rotate(${streakAngle}deg)">`;
-        for (let s = 0; s < 10; s++) {
-          const delay = (streakDur * s * 0.1).toFixed(1);
-          windStreaks += `<div class="wind-streak" style="--streak-dur:${streakDur}s;--streak-delay:${delay}s"></div>`;
+        const tileSize = Math.round(tilePx);
+        const streakCount = Math.min(20, Math.max(8, Math.round(tilePx / 8)));
+        let windStreaks = `<div class="wind-streaks" style="--tile-size:${tileSize}px;transform:rotate(${streakAngle}deg)">`;
+        for (let s = 0; s < streakCount; s++) {
+          const topPct = (5 + (90 * s / (streakCount - 1))).toFixed(1);
+          const w = Math.round(8 + Math.random() * 14);
+          const delay = (parseFloat(streakDur) * s / streakCount).toFixed(2);
+          windStreaks += `<div class="wind-streak" style="top:${topPct}%;width:${w}px;--streak-dur:${streakDur}s;--streak-delay:${delay}s"></div>`;
         }
         windStreaks += `</div>`;
 
