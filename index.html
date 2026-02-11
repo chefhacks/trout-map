@@ -230,6 +230,10 @@
 
       <div class="panel-section">
         <div class="panel-section-title">Controls</div>
+        <label for="forecastDay">Day</label>
+        <select id="forecastDay"></select>
+        <label for="forecastHour">Hour: <span id="forecastHourLabel">Now</span></label>
+        <input type="range" id="forecastHour" min="0" max="23" step="1" value="12">
         <label for="colorBy">Forecast</label>
         <select id="colorBy">
           <option value="temperature_2m">Temperature</option>
@@ -414,7 +418,7 @@
     }
 
     // --- Cache ---
-    // Key: "lat|lon" -> { data: {temp, wind, windDir, pressure, precip, cloud}, timestamp }
+    // Key: "lat|lon" -> { hourly: { time, temperature_2m, ... }, timestamp }
     const cache = new Map();
 
     function cacheKey(lat, lon) { return `${lat}|${lon}`; }
@@ -426,19 +430,18 @@
         cache.delete(cacheKey(lat, lon));
         return undefined;
       }
-      return entry.data;
+      return entry.hourly;
     }
 
-    function cachePut(lat, lon, data) {
+    function cachePut(lat, lon, hourly) {
       if (cache.size >= CACHE_MAX_ENTRIES) {
-        // Evict oldest
         let oldestKey = null, oldestTs = Infinity;
         for (const [k, v] of cache) {
           if (v.timestamp < oldestTs) { oldestTs = v.timestamp; oldestKey = k; }
         }
         if (oldestKey) cache.delete(oldestKey);
       }
-      cache.set(cacheKey(lat, lon), { data, timestamp: Date.now() });
+      cache.set(cacheKey(lat, lon), { hourly, timestamp: Date.now() });
     }
 
     function cacheValidCount() {
@@ -448,6 +451,55 @@
         if (now - v.timestamp <= CACHE_TTL_MS) n++;
       }
       return n;
+    }
+
+    // Extract a single hour's data from full hourly arrays
+    function extractHourData(hourly, hourIndex) {
+      const d = {
+        temperature_2m:     hourly.temperature_2m[hourIndex],
+        wind_speed_10m:     hourly.wind_speed_10m[hourIndex],
+        wind_direction_10m: hourly.wind_direction_10m[hourIndex],
+        surface_pressure:   hourly.surface_pressure[hourIndex],
+        precipitation:      hourly.precipitation[hourIndex],
+        cloud_cover:        hourly.cloud_cover[hourIndex],
+      };
+      d.fish_score = computeFishScore(d);
+      return d;
+    }
+
+    // Get the selected hour index based on day/hour controls
+    function getSelectedHourIndex(times) {
+      const dayOffset = parseInt(document.getElementById('forecastDay').value);
+      const hour = parseInt(document.getElementById('forecastHour').value);
+
+      // If "Today" and hour matches current → use closest to now
+      if (dayOffset === 0) {
+        const now = new Date();
+        const currentHour = now.getHours();
+        const selectedHour = parseInt(document.getElementById('forecastHour').value);
+        // Find the index for today at the selected hour
+        const targetDate = new Date(now);
+        targetDate.setHours(selectedHour, 0, 0, 0);
+
+        let bestIdx = 0, bestDiff = Infinity;
+        for (let i = 0; i < times.length; i++) {
+          const diff = Math.abs(new Date(times[i]).getTime() - targetDate.getTime());
+          if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+        }
+        return bestIdx;
+      }
+
+      // For future days: find the target date+hour
+      const target = new Date();
+      target.setDate(target.getDate() + dayOffset);
+      target.setHours(hour, 0, 0, 0);
+
+      let bestIdx = 0, bestDiff = Infinity;
+      for (let i = 0; i < times.length; i++) {
+        const diff = Math.abs(new Date(times[i]).getTime() - target.getTime());
+        if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+      }
+      return bestIdx;
     }
 
     // --- Color interpolation ---
@@ -514,16 +566,6 @@
       return points;
     }
 
-    function getCurrentHourIndex(times) {
-      const now = new Date();
-      let bestIdx = 0, bestDiff = Infinity;
-      for (let i = 0; i < times.length; i++) {
-        const diff = Math.abs(new Date(times[i]).getTime() - now.getTime());
-        if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-      }
-      return bestIdx;
-    }
-
     function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
     // --- API ---
@@ -543,29 +585,22 @@
       throw new Error('Max retries exceeded (429)');
     }
 
-    // Fetch ALL fishing variables for a batch of points in ONE request
+    // Fetch ALL fishing variables for a batch of points in ONE request (7 days)
     async function fetchBatch(points, signal) {
       const lats = points.map(p => p.lat).join(',');
       const lons = points.map(p => p.lon).join(',');
-      const url = `${API_BASE}?latitude=${lats}&longitude=${lons}&hourly=${HOURLY_VARS}&forecast_days=1&timezone=auto`;
+      const url = `${API_BASE}?latitude=${lats}&longitude=${lons}&hourly=${HOURLY_VARS}&forecast_days=7&timezone=auto`;
 
       const resp = await fetchWithRetry(url, signal);
       const raw = await resp.json();
       const results = Array.isArray(raw) ? raw : [raw];
 
       return results.map((r, i) => {
-        const hi = getCurrentHourIndex(r.hourly.time);
-        const data = {
-          temperature_2m:     r.hourly.temperature_2m[hi],
-          wind_speed_10m:     r.hourly.wind_speed_10m[hi],
-          wind_direction_10m: r.hourly.wind_direction_10m[hi],
-          surface_pressure:   r.hourly.surface_pressure[hi],
-          precipitation:      r.hourly.precipitation[hi],
-          cloud_cover:        r.hourly.cloud_cover[hi],
-        };
-        data.fish_score = computeFishScore(data);
-        cachePut(points[i].lat, points[i].lon, data);
-        return { lat: points[i].lat, lon: points[i].lon, data };
+        const hourly = r.hourly;
+        cachePut(points[i].lat, points[i].lon, hourly);
+        const hi = getSelectedHourIndex(hourly.time);
+        const data = extractHourData(hourly, hi);
+        return { lat: points[i].lat, lon: points[i].lon, data, hourly };
       });
     }
 
@@ -693,9 +728,11 @@
       // Split cached vs uncached
       const cached = [], uncached = [];
       for (const pt of points) {
-        const d = forceRefresh ? undefined : cacheGet(pt.lat, pt.lon);
-        if (d !== undefined) {
-          cached.push({ lat: pt.lat, lon: pt.lon, data: d });
+        const hourly = forceRefresh ? undefined : cacheGet(pt.lat, pt.lon);
+        if (hourly !== undefined) {
+          const hi = getSelectedHourIndex(hourly.time);
+          const data = extractHourData(hourly, hi);
+          cached.push({ lat: pt.lat, lon: pt.lon, data, hourly });
         } else {
           uncached.push(pt);
         }
@@ -801,6 +838,35 @@
     map.on('moveend', debouncedLoad);
     map.on('zoomend', debouncedLoad);
 
+    // Re-extract hour data from cached hourly arrays and re-render
+    function reRenderFromCache() {
+      if (!lastRenderData) return;
+      const pts = lastRenderData.points.map(pt => {
+        if (!pt.hourly) return pt;
+        const hi = getSelectedHourIndex(pt.hourly.time);
+        return { lat: pt.lat, lon: pt.lon, data: extractHourData(pt.hourly, hi), hourly: pt.hourly };
+      });
+      lastRenderData.points = pts;
+      renderOverlay(pts, lastRenderData.step);
+    }
+
+    // Update hour label display
+    function updateHourLabel() {
+      const hour = document.getElementById('forecastHour').value;
+      const dayVal = document.getElementById('forecastDay').value;
+      document.getElementById('forecastHourLabel').textContent = `${hour}:00`;
+    }
+
+    document.getElementById('forecastDay').addEventListener('change', () => {
+      updateHourLabel();
+      reRenderFromCache();
+    });
+
+    document.getElementById('forecastHour').addEventListener('input', () => {
+      updateHourLabel();
+      reRenderFromCache();
+    });
+
     document.getElementById('colorBy').addEventListener('change', () => {
       if (lastRenderData) {
         renderOverlay(lastRenderData.points, lastRenderData.step);
@@ -830,6 +896,28 @@
     window.onunhandledrejection = function(e) {
       document.getElementById('status').textContent = 'ERR: ' + (e.reason?.message || e.reason);
     };
+
+    // Populate day dropdown with actual dates
+    (function populateDaySelect() {
+      const sel = document.getElementById('forecastDay');
+      const dayNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() + i);
+        const label = i === 0 ? 'Today' : i === 1 ? 'Tomorrow'
+          : `${dayNames[d.getDay()]} ${d.getDate()} ${monthNames[d.getMonth()]}`;
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = label;
+        sel.appendChild(opt);
+      }
+    })();
+
+    // Initialize hour slider to current hour
+    const initHour = new Date().getHours();
+    document.getElementById('forecastHour').value = initHour;
+    updateHourLabel();
 
     updateLegend();
     setTimeout(() => loadWeatherData(false), 500);
