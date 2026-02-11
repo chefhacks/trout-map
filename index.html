@@ -293,6 +293,58 @@
       100% { transform: translateX(var(--streak-travel, 150px)); opacity: 0; }
     }
 
+    /* --- Animated rain drops --- */
+    .rain-layer {
+      position: absolute;
+      width: var(--tile-size, 120px);
+      height: var(--tile-size, 120px);
+      top: calc(var(--tile-size, 120px) / -2);
+      left: calc(var(--tile-size, 120px) / -2);
+      pointer-events: none;
+    }
+    .rain-drop {
+      position: absolute;
+      width: 2px;
+      border-radius: 0 0 2px 2px;
+      background: rgba(80,130,220,0.7);
+      animation: rain-fall var(--rain-dur, 1s) linear infinite;
+      animation-delay: var(--rain-delay, 0s);
+    }
+    @keyframes rain-fall {
+      0%   { transform: translateY(-10px); opacity: 0; }
+      8%   { opacity: 0.8; }
+      85%  { opacity: 0.6; }
+      100% { transform: translateY(var(--tile-size, 120px)); opacity: 0; }
+    }
+
+    /* --- Pressure trend arrow --- */
+    .pressure-trend {
+      display: inline-block;
+      font-size: 1.3em;
+      font-weight: 700;
+      vertical-align: middle;
+      margin-left: 2px;
+    }
+    .pressure-trend.rising {
+      color: #16a34a;
+      animation: trend-bob-up 1.8s ease-in-out infinite;
+    }
+    .pressure-trend.falling {
+      color: #dc2626;
+      animation: trend-bob-down 1.8s ease-in-out infinite;
+    }
+    .pressure-trend.steady {
+      color: #888;
+    }
+    @keyframes trend-bob-up {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(-3px); }
+    }
+    @keyframes trend-bob-down {
+      0%, 100% { transform: translateY(0); }
+      50%      { transform: translateY(3px); }
+    }
+
     /* Dim overlay behind panel on mobile */
     .panel-backdrop {
       display: none;
@@ -585,6 +637,19 @@
         precipitation:      hourly.precipitation[hourIndex],
         cloud_cover:        hourly.cloud_cover[hourIndex],
       };
+      // Pressure trend: compare to 3 hours ago
+      const lookback = 3;
+      const prevIdx = Math.max(0, hourIndex - lookback);
+      const prevP = hourly.surface_pressure[prevIdx];
+      const curP = d.surface_pressure;
+      if (prevP != null && curP != null) {
+        const diff = curP - prevP;
+        d.pressure_trend = diff > 0.5 ? 'rising' : diff < -0.5 ? 'falling' : 'steady';
+        d.pressure_diff = diff;
+      } else {
+        d.pressure_trend = 'steady';
+        d.pressure_diff = 0;
+      }
       d.fish_score = computeFishScore(d);
       return d;
     }
@@ -759,45 +824,73 @@
         );
         rectLayer.addLayer(rect);
 
-        // Build label HTML
+        // Build label HTML — mode-specific animations & text
         const compass = windDirToCompass(d.wind_direction_10m);
         const arrow = windDirToArrow(d.wind_direction_10m);
-        // Streaks animate left→right by default (= 90° compass heading).
-        // Meteorological wind_direction is "from" direction, so wind blows
-        // toward (deg + 180). Subtract 90 to align with the base animation.
-        const streakAngle = (d.wind_direction_10m + 90) % 360;
-        const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
         const tileSize = Math.round(tilePx);
-        const travel = Math.round(tilePx * 1.4);  // overshoot into next tile
-        const streakCount = Math.min(24, Math.max(10, Math.round(tilePx / 6)));
-        let windStreaks = `<div class="wind-streaks" style="--tile-size:${tileSize}px;--streak-travel:${travel}px;transform:rotate(${streakAngle}deg)">`;
-        for (let s = 0; s < streakCount; s++) {
-          const topPct = (Math.random() * 100).toFixed(1);
-          const startPct = (-20 + Math.random() * 80).toFixed(1);  // random start from -20% to 60%
-          const w = Math.round(10 + Math.random() * 16);
-          const delay = (Math.random() * parseFloat(streakDur)).toFixed(2);
-          windStreaks += `<div class="wind-streak" style="top:${topPct}%;left:${startPct}%;width:${w}px;--streak-dur:${streakDur}s;--streak-delay:${delay}s"></div>`;
-        }
-        windStreaks += `</div>`;
 
-        // Primary value based on selected forecast
+        // --- Wind streaks (used in temperature & wind modes) ---
+        let animationHtml = '';
+        if (colorBy === 'temperature_2m' || colorBy === 'wind_speed_10m') {
+          const streakAngle = (d.wind_direction_10m + 90) % 360;
+          const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
+          const travel = Math.round(tilePx * 1.4);
+          const streakCount = Math.min(24, Math.max(10, Math.round(tilePx / 6)));
+          animationHtml = `<div class="wind-streaks" style="--tile-size:${tileSize}px;--streak-travel:${travel}px;transform:rotate(${streakAngle}deg)">`;
+          for (let s = 0; s < streakCount; s++) {
+            const topPct = (Math.random() * 100).toFixed(1);
+            const startPct = (-20 + Math.random() * 80).toFixed(1);
+            const w = Math.round(10 + Math.random() * 16);
+            const delay = (Math.random() * parseFloat(streakDur)).toFixed(2);
+            animationHtml += `<div class="wind-streak" style="top:${topPct}%;left:${startPct}%;width:${w}px;--streak-dur:${streakDur}s;--streak-delay:${delay}s"></div>`;
+          }
+          animationHtml += `</div>`;
+        }
+
+        // --- Rain drops (precipitation mode) ---
+        if (colorBy === 'precipitation') {
+          const mm = d.precipitation;
+          const rainDur = mm > 5 ? 0.5 : mm > 2 ? 0.8 : mm > 0.5 ? 1.2 : mm > 0.1 ? 1.8 : 2.5;
+          const dropCount = mm > 5 ? 22 : mm > 2 ? 16 : mm > 0.5 ? 10 : mm > 0.1 ? 6 : 3;
+          animationHtml = `<div class="rain-layer" style="--tile-size:${tileSize}px">`;
+          for (let r = 0; r < dropCount; r++) {
+            const leftPct = (Math.random() * 100).toFixed(1);
+            const h = Math.round(6 + Math.random() * 10);
+            const delay = (Math.random() * rainDur).toFixed(2);
+            const durVar = (rainDur * (0.8 + Math.random() * 0.4)).toFixed(2);
+            animationHtml += `<div class="rain-drop" style="left:${leftPct}%;height:${h}px;--rain-dur:${durVar}s;--rain-delay:${delay}s"></div>`;
+          }
+          animationHtml += `</div>`;
+        }
+
+        // --- Pressure trend arrow ---
+        let trendHtml = '';
+        if (colorBy === 'surface_pressure') {
+          const trend = d.pressure_trend || 'steady';
+          const trendArrow = trend === 'rising' ? '&#9650;' : trend === 'falling' ? '&#9660;' : '&#9644;';
+          const diffText = d.pressure_diff != null ? `${d.pressure_diff > 0 ? '+' : ''}${d.pressure_diff.toFixed(1)}` : '';
+          trendHtml = `<span class="pressure-trend ${trend}">${trendArrow}</span>`;
+          if (zoom >= 10) trendHtml += `<span style="font-size:0.7em;opacity:0.7"> ${diffText}</span>`;
+        }
+
+        // --- Labels per mode ---
         let primaryText, secondaryText;
         switch (colorBy) {
           case 'temperature_2m':
             primaryText = `${d.temperature_2m.toFixed(1)}°C`;
             secondaryText = `${d.wind_speed_10m.toFixed(0)}km/h ${arrow}`;
             break;
-          case 'surface_pressure':
-            primaryText = `${d.surface_pressure.toFixed(0)}hPa`;
-            secondaryText = `${d.temperature_2m.toFixed(0)}°`;
-            break;
           case 'wind_speed_10m':
             primaryText = `${d.wind_speed_10m.toFixed(0)}km/h ${arrow}`;
-            secondaryText = `${d.temperature_2m.toFixed(0)}°`;
+            secondaryText = compass;
+            break;
+          case 'surface_pressure':
+            primaryText = `${d.surface_pressure.toFixed(0)}${trendHtml}`;
+            secondaryText = `hPa`;
             break;
           case 'precipitation':
             primaryText = `${d.precipitation.toFixed(1)}mm`;
-            secondaryText = `☁${d.cloud_cover}%`;
+            secondaryText = zoom >= 10 ? `☁${d.cloud_cover}%` : '';
             break;
           case 'cloud_cover':
             primaryText = `☁${d.cloud_cover}%`;
@@ -811,13 +904,13 @@
         let labelHtml;
         if (zoom >= 10) {
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            windStreaks +
+            animationHtml +
             `<span class="primary-val">${primaryText}</span>` +
             `<br>${secondaryText}` +
             `</div>`;
         } else {
           labelHtml = `<div class="tile-label" style="font-size:${fontSize}px">` +
-            windStreaks +
+            animationHtml +
             `<span class="primary-val">${primaryText}</span>` +
             `</div>`;
         }
