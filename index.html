@@ -452,7 +452,7 @@
   <script>
     // --- Config ---
     const BULGARIA_CENTER = [42.6977, 23.3219]; // Sofia
-    const INITIAL_ZOOM = 8;
+    const INITIAL_ZOOM = 9;
     const API_BASE = 'https://api.open-meteo.com/v1/forecast';
     const MAX_POINTS_PER_REQUEST = 150;
     const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -722,7 +722,11 @@
     }).addTo(map);
 
     // --- State ---
-    let rectLayer = L.layerGroup().addTo(map);
+    // Custom pane for color rectangles so we can blur them independently
+    map.createPane('weatherOverlay');
+    map.getPane('weatherOverlay').style.zIndex = 350;
+    map.getPane('weatherOverlay').style.filter = 'blur(6px)';
+    let rectLayer = L.layerGroup({ pane: 'weatherOverlay' }).addTo(map);
     let labelLayer = L.layerGroup().addTo(map);
     let currentAbort = null;
     let debounceTimer = null;
@@ -820,7 +824,7 @@
 
         const rect = L.rectangle(
           [[pt.lat - halfCell, pt.lon - halfCell], [pt.lat + halfCell, pt.lon + halfCell]],
-          { color: 'transparent', weight: 0, fillColor: rgbStr(color, 1), fillOpacity: opacity }
+          { pane: 'weatherOverlay', color: 'transparent', weight: 0, fillColor: rgbStr(color, 1), fillOpacity: opacity }
         );
         rectLayer.addLayer(rect);
 
@@ -847,8 +851,8 @@
           animationHtml += `</div>`;
         }
 
-        // --- Rain drops (precipitation mode) ---
-        if (colorBy === 'precipitation') {
+        // --- Rain drops (precipitation mode, skip if 0mm) ---
+        if (colorBy === 'precipitation' && d.precipitation > 0) {
           const mm = d.precipitation;
           const rainDur = mm > 5 ? 0.5 : mm > 2 ? 0.8 : mm > 0.5 ? 1.2 : mm > 0.1 ? 1.8 : 2.5;
           const dropCount = mm > 5 ? 22 : mm > 2 ? 16 : mm > 0.5 ? 10 : mm > 0.1 ? 6 : 3;
