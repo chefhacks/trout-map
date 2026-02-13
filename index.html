@@ -280,9 +280,9 @@
     }
     .wind-streak {
       position: absolute;
-      height: 2px;
-      background: rgba(30,60,130,0.7);
-      border-radius: 2px;
+      height: 1px;
+      background: rgba(30,60,130,0.6);
+      border-radius: 1px;
       animation: streak-drift var(--streak-dur, 2s) linear infinite;
       animation-delay: var(--streak-delay, 0s);
     }
@@ -839,12 +839,12 @@
           const streakAngle = (d.wind_direction_10m + 90) % 360;
           const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
           const travel = Math.round(tilePx * 1.4);
-          const streakCount = Math.min(24, Math.max(10, Math.round(tilePx / 6)));
+          const streakCount = Math.min(120, Math.max(50, Math.round(tilePx)));
           animationHtml = `<div class="wind-streaks" style="--tile-size:${tileSize}px;--streak-travel:${travel}px;transform:rotate(${streakAngle}deg)">`;
           for (let s = 0; s < streakCount; s++) {
             const topPct = (Math.random() * 100).toFixed(1);
             const startPct = (-20 + Math.random() * 80).toFixed(1);
-            const w = Math.round(10 + Math.random() * 16);
+            const w = Math.round(4 + Math.random() * 8);
             const delay = (Math.random() * parseFloat(streakDur)).toFixed(2);
             animationHtml += `<div class="wind-streak" style="top:${topPct}%;left:${startPct}%;width:${w}px;--streak-dur:${streakDur}s;--streak-delay:${delay}s"></div>`;
           }
