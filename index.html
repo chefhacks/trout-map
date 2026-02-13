@@ -839,7 +839,7 @@
           const streakAngle = (d.wind_direction_10m + 90) % 360;
           const streakDur = Math.max(0.6, 3 - d.wind_speed_10m * 0.04).toFixed(1);
           const travel = Math.round(tilePx * 1.4);
-          const streakCount = Math.min(120, Math.max(50, Math.round(tilePx)));
+          const streakCount = Math.min(30, Math.max(20, Math.round(tilePx / 5)));
           animationHtml = `<div class="wind-streaks" style="--tile-size:${tileSize}px;--streak-travel:${travel}px;transform:rotate(${streakAngle}deg)">`;
           for (let s = 0; s < streakCount; s++) {
             const topPct = (Math.random() * 100).toFixed(1);
